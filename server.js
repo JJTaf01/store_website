@@ -694,27 +694,31 @@ app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
     const { data: subscribers } = await supabase.from('newsletters').select('email');
     if (!subscribers || subscribers.length === 0) return res.status(400).json({ error: 'No subscribers' });
 
+    const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+    console.log('Sending newsletter from:', fromEmail, 'to', subscribers.length, 'subscribers');
+
     const emails = subscribers.map(s => s.email);
     const batchSize = 50;
     let sent = 0;
     for (let i = 0; i < emails.length; i += batchSize) {
       const batch = emails.slice(i, i + batchSize);
       try {
-        await transporter.sendMail({
-          from: `"JJ's 3D Shop" <${process.env.SMTP_USER}>`,
-          to: process.env.SMTP_FROM || process.env.SMTP_USER,
+        const info = await transporter.sendMail({
+          from: `"JJ's 3D Shop" <${fromEmail}>`,
+          to: fromEmail,
           bcc: batch,
           subject: subject,
           html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
             <h2 style="color:#088178;">${subject}</h2>
             <p>${message.replace(/\n/g, '<br>')}</p>
-            <hr><p style="color:#888;font-size:12px;">You are receiving this because you subscribed to JJ's 3D Shop newsletter. <a href="${process.env.APP_URL || 'https://jj3dshop.cc'}">Unsubscribe</a></p>
+            <hr><p style="color:#888;font-size:12px;">You are receiving this because you subscribed to JJ's 3D Shop newsletter.</p>
           </div>`
         });
+        console.log('Batch sent:', info.messageId);
         sent += batch.length;
       } catch (err) {
-        console.error('Batch send error:', err.message);
-        return res.status(500).json({ error: 'Email send failed: ' + err.message, sent });
+        console.error('Batch send error:', err.message, err.code);
+        return res.status(500).json({ error: 'Email send failed: ' + err.message + ' (code: ' + (err.code || 'none') + ')', sent });
       }
     }
 

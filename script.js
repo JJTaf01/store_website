@@ -601,6 +601,20 @@ async function loadDashboardNewsletter() {
       tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:30px">No subscribers yet.</td></tr>';
       return;
     }
+    const emails = subs.map(s => s.email).join(', ');
+    const copyBtn = document.querySelector('#dash-newsletter .copy-emails-btn') || (() => {
+      const btn = document.createElement('button');
+      btn.className = 'normal copy-emails-btn';
+      btn.style.marginLeft = '10px';
+      btn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy Emails';
+      btn.onclick = () => {
+        navigator.clipboard.writeText(emails).then(() => alert('Emails copied!')).catch(() => alert('Failed to copy'));
+      };
+      document.querySelector('#dash-newsletter h3').after(btn);
+      return btn;
+    })();
+    copyBtn.style.display = 'inline-block';
+
     tbody.innerHTML = subs.map(s => `<tr>
       <td>${escapeHtml(s.username || '-')}</td>
       <td>${escapeHtml(s.email)}</td>
@@ -625,26 +639,23 @@ function createNewsletterModal() {
     <div class="modal-content" style="max-width:500px">
       <span class="modal-close" onclick="this.closest('.modal-overlay').style.display='none'">&times;</span>
       <h2>Send Newsletter</h2>
-      <form id="newsletter-send-form">
-        <div class="form-group"><label for="newsletter-subject">Subject *</label><input type="text" id="newsletter-subject" required placeholder="Email subject"></div>
-        <div class="form-group"><label for="newsletter-message">Message *</label><textarea id="newsletter-message" rows="8" required placeholder="Write your message..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
-        <button type="submit" class="modal-submit">Send to All Subscribers</button>
-      </form>
+      <div class="form-group"><label for="newsletter-subject">Subject *</label><input type="text" id="newsletter-subject" placeholder="Email subject"></div>
+      <div class="form-group"><label for="newsletter-message">Message *</label><textarea id="newsletter-message" rows="8" placeholder="Write your message..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
+      <button class="modal-submit" id="newsletter-send-btn">Send to All Subscribers</button>
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
-  document.getElementById('newsletter-send-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
+  document.getElementById('newsletter-send-btn').addEventListener('click', async () => {
     const subject = document.getElementById('newsletter-subject').value;
     const message = document.getElementById('newsletter-message').value;
-    const btn = e.target.querySelector('button');
+    if (!subject || !message) { alert('Subject and message required'); return; }
+    const btn = document.getElementById('newsletter-send-btn');
     btn.disabled = true;
     btn.textContent = 'Sending...';
     try {
       const res = await api.sendNewsletter(subject, message);
-      alert(`Newsletter sent to ${res.sent} subscribers!`);
+      alert('Newsletter sent to ' + res.sent + ' subscribers!');
       modal.style.display = 'none';
-      e.target.reset();
     } catch (err) { alert('Error: ' + err.message); }
     finally { btn.disabled = false; btn.textContent = 'Send to All Subscribers'; }
   });
