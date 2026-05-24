@@ -153,8 +153,7 @@ app.post('/api/auth/signup', async (req, res) => {
     const { data: existing } = await supabase.from('users').select('id').ilike('email', normEmail).maybeSingle();
     if (existing) return res.status(400).json({ error: 'Email already registered' });
 
-    const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
-    const isAdmin = count === 0 ? 1 : 0;
+    const isAdmin = normEmail === 'jj3dprintshop@gmail.com' ? 1 : 0;
 
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -173,7 +172,12 @@ app.post('/api/auth/signup', async (req, res) => {
     if (error) return res.status(500).json({ error: error.message });
 
     if (transporter) {
-      await sendVerificationEmail(req, { id: user.id, username, email: normEmail }, verificationToken);
+      try {
+        await sendVerificationEmail(req, { id: user.id, username, email: normEmail }, verificationToken);
+      } catch (emailErr) {
+        console.error('Verification email failed, allowing login:', emailErr.message);
+        await supabase.from('users').update({ email_verified: true, verification_token: null, verification_expires: null }).eq('id', user.id);
+      }
     }
 
     req.session.userId = user.id;
@@ -253,7 +257,7 @@ app.post('/api/auth/login', async (req, res) => {
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ error: 'Invalid email or password' });
 
-    if (transporter && !user.email_verified) {
+    if (transporter && !user.email_verified && user.email !== 'jj3dprintshop@gmail.com') {
       return res.status(403).json({ 
         error: 'Email not verified', 
         needsVerification: true,
@@ -261,9 +265,14 @@ app.post('/api/auth/login', async (req, res) => {
       });
     }
 
+    const isAdmin = user.email === 'jj3dprintshop@gmail.com' ? 1 : user.is_admin;
+    if (isAdmin !== user.is_admin) {
+      await supabase.from('users').update({ is_admin: isAdmin }).eq('id', user.id);
+    }
+
     req.session.userId = user.id;
-    req.session.isAdmin = user.is_admin;
-    res.json({ user: { id: user.id, username: user.username, email: user.email, is_admin: user.is_admin } });
+    req.session.isAdmin = isAdmin;
+    res.json({ user: { id: user.id, username: user.username, email: user.email, is_admin: isAdmin } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -272,7 +281,13 @@ app.post('/api/auth/logout', (req, res) => { req.session.destroy(); res.json({ s
 app.get('/api/auth/me', async (req, res) => {
   if (!req.session.userId) return res.json({ user: null });
   const { data: user } = await supabase.from('users').select('*').eq('id', req.session.userId).maybeSingle();
-  res.json({ user: user ? { id: user.id, username: user.username, email: user.email, is_admin: user.is_admin, email_verified: user.email_verified } : null });
+  if (!user) return res.json({ user: null });
+  const isAdmin = user.email === 'jj3dprintshop@gmail.com' ? 1 : user.is_admin;
+  if (isAdmin !== user.is_admin) {
+    await supabase.from('users').update({ is_admin: isAdmin }).eq('id', user.id);
+  }
+  req.session.isAdmin = isAdmin;
+  res.json({ user: { id: user.id, username: user.username, email: user.email, is_admin: isAdmin, email_verified: user.email_verified } });
 });
 
 // ─── Products ──────────────────────────────────────────────

@@ -1,4 +1,3 @@
-const ADMIN_CODE = '04122010';
 let shippingOptions = [];
 let selectedShipping = 'standard';
 
@@ -64,15 +63,13 @@ const api = {
 
 // ─── Auth ───────────────────────────────────────────────
 async function checkAuth() {
-  try { const data = await api.checkAuth(); return data.user; }
-  catch { return null; }
+  try { const data = await api.checkAuth(); currentUser = data.user; return data.user; }
+  catch { currentUser = null; return null; }
 }
 
-function isAdminMode() { return localStorage.getItem('admin_mode') === 'true'; }
+let currentUser = null;
+function isAdminMode() { return currentUser && currentUser.is_admin === 1; }
 function setAdminMode(val) {
-  if (val) localStorage.setItem('admin_mode', 'true');
-  else localStorage.removeItem('admin_mode');
-  updateAdminUI();
   if (!val && window.location.pathname.includes('dashboard.html')) window.location.href = 'index.html';
 }
 
@@ -111,7 +108,6 @@ function updateNavbar(user) {
     authLink.innerHTML = `<a href="#" id="logoutBtn">${user.username} (Logout)</a>`;
     document.getElementById('logoutBtn')?.addEventListener('click', async (e) => {
       e.preventDefault();
-      localStorage.removeItem('admin_mode');
       await api.logout();
       window.location.reload();
     });
@@ -119,13 +115,16 @@ function updateNavbar(user) {
     authLink.innerHTML = `<a href="signup.html" id="signupBtn">Sign Up</a>`;
   }
 
+  const adminNav = document.getElementById('admin-nav-item');
+  if (adminNav) adminNav.style.display = isAdminMode() ? '' : 'none';
+
   if (isAdminMode()) {
     showAdminBanner();
     let fab = document.getElementById('admin-fab');
     if (!fab) {
       fab = document.createElement('div');
       fab.id = 'admin-fab'; fab.innerHTML = '+';
-      fab.addEventListener('click', () => { if (isAdminMode()) showAdminModal(); else promptAdminCode(); });
+      fab.addEventListener('click', () => { if (isAdminMode()) showAdminModal(); });
       document.body.appendChild(fab);
     }
     fab.style.display = 'flex';
@@ -134,14 +133,6 @@ function updateNavbar(user) {
     const fab = document.getElementById('admin-fab');
     if (fab) fab.style.display = 'none';
   }
-}
-
-function promptAdminCode() {
-  const code = prompt('Enter admin code to access dashboard:');
-  if (code === ADMIN_CODE) {
-    setAdminMode(true);
-    loadProducts();
-  } else if (code !== null) alert('Wrong code!');
 }
 
 // ─── Admin Product Edit Modal ──────────────────────────
@@ -163,7 +154,7 @@ function showEditModal(product) {
 }
 
 function showAdminModal() {
-  if (!isAdminMode()) { promptAdminCode(); return; }
+  if (!isAdminMode()) { alert('Admin access required'); return; }
   editingProductId = null;
   let modal = document.getElementById('admin-modal');
   if (!modal) createAdminModal();
@@ -254,7 +245,7 @@ async function loadProducts() {
     document.querySelectorAll('.delete-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!isAdminMode()) { promptAdminCode(); return; }
+        if (!isAdminMode()) { return; }
         if (confirm('Delete this product?')) {
           try { await api.deleteProduct(parseInt(btn.dataset.id)); loadProducts(); }
           catch (err) { alert('Error: ' + err.message); }
@@ -264,7 +255,7 @@ async function loadProducts() {
     document.querySelectorAll('.edit-btn').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!isAdminMode()) { promptAdminCode(); return; }
+        if (!isAdminMode()) { return; }
         const id = parseInt(btn.dataset.id);
         try { const d = await api.getProduct(id); showEditModal(d.product); }
         catch (err) { alert('Error: ' + err.message); }
@@ -813,11 +804,9 @@ function initSignupPage() {
       const email = document.getElementById('reg-email')?.value;
       const password = document.getElementById('reg-password')?.value;
       const confirm = document.getElementById('reg-confirm')?.value;
-      const code = document.getElementById('reg-admin-code')?.value;
       if (password !== confirm) { alert('Passwords do not match'); return; }
       try {
         const result = await api.register(username, email, password);
-        if (code === ADMIN_CODE) setAdminMode(true);
         if (result && result.needsVerification) {
           alert('Account created! Please check your email (and spam folder) to verify your email address.');
         }
@@ -874,6 +863,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     const adminLi = document.createElement('li');
+    adminLi.id = 'admin-nav-item';
     adminLi.innerHTML = '<a href="#" id="admin-panel-btn" style="color:#088178;font-weight:700">Admin</a>';
     if (authLink) authLink.parentNode.insertBefore(adminLi, authLink);
     document.getElementById('admin-panel-btn')?.addEventListener('click', (e) => {
@@ -881,8 +871,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (isAdminMode()) {
         if (window.location.pathname.includes('dashboard.html')) showAdminModal();
         else window.location.href = 'dashboard.html';
-      } else { promptAdminCode(); }
+      }
     });
+    if (!isAdminMode()) adminLi.style.display = 'none';
+    else adminLi.style.display = '';
   }
 });
 

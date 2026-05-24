@@ -13,6 +13,12 @@ ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS username TEXT DEFAULT '';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_method TEXT DEFAULT '';
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_courier TEXT DEFAULT '';
 
+-- Delete old users and their data (except the admin account)
+DELETE FROM wishlist_items WHERE user_id IN (SELECT id FROM users WHERE email != 'jj3dprintshop@gmail.com');
+DELETE FROM cart_items WHERE user_id IN (SELECT id FROM users WHERE email != 'jj3dprintshop@gmail.com');
+DELETE FROM orders WHERE user_id IN (SELECT id FROM users WHERE email != 'jj3dprintshop@gmail.com');
+DELETE FROM users WHERE email != 'jj3dprintshop@gmail.com';
+
 -- Refresh the schema cache so Supabase picks up the new columns
 -- (run this in the Supabase SQL editor if the above doesn't resolve the issue)
 SELECT pg_catalog.pg_reload_conf();
