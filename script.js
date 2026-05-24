@@ -625,8 +625,8 @@ function createNewsletterModal() {
       <span class="modal-close" onclick="this.closest('.modal-overlay').style.display='none'">&times;</span>
       <h2>Send Newsletter</h2>
       <form id="newsletter-send-form">
-        <div class="form-group"><label>Subject *</label><input type="text" id="newsletter-subject" required placeholder="Email subject"></div>
-        <div class="form-group"><label>Message *</label><textarea id="newsletter-message" rows="8" required placeholder="Write your message..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
+        <div class="form-group"><label for="newsletter-subject">Subject *</label><input type="text" id="newsletter-subject" required placeholder="Email subject"></div>
+        <div class="form-group"><label for="newsletter-message">Message *</label><textarea id="newsletter-message" rows="8" required placeholder="Write your message..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
         <button type="submit" class="modal-submit">Send to All Subscribers</button>
       </form>
     </div>`;
@@ -666,9 +666,9 @@ function createContactModal() {
       <h2>Contact Me</h2>
       <p style="color:#666;margin-bottom:20px">Have a problem? Send me a message and I'll get back to you.</p>
       <form id="contact-form">
-        <div class="form-group"><label>Your Name *</label><input type="text" id="contact-name" required placeholder="Your name"></div>
-        <div class="form-group"><label>Your Email *</label><input type="email" id="contact-email" required placeholder="your@email.com"></div>
-        <div class="form-group"><label>Subject *</label>
+        <div class="form-group"><label for="contact-name">Your Name *</label><input type="text" id="contact-name" required placeholder="Your name"></div>
+        <div class="form-group"><label for="contact-email">Your Email *</label><input type="email" id="contact-email" required placeholder="your@email.com"></div>
+        <div class="form-group"><label for="contact-subject">Subject *</label>
           <select id="contact-subject" required style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px">
             <option value="">-- Select a problem --</option>
             <option value="Order Issue">Order Issue</option>
@@ -682,7 +682,7 @@ function createContactModal() {
             <option value="Other">Other</option>
           </select>
         </div>
-        <div class="form-group"><label>Message *</label><textarea id="contact-message" rows="6" required placeholder="Describe your problem in detail..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
+        <div class="form-group"><label for="contact-message">Message *</label><textarea id="contact-message" rows="6" required placeholder="Describe your problem in detail..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
         <button type="submit" class="modal-submit">Send Message</button>
       </form>
     </div>`;
@@ -775,25 +775,7 @@ function initSignupPage() {
         await api.login(email, password); 
         window.location.href = 'index.html'; 
       } catch (err) { 
-        if (err.message && err.message.includes('Email not verified')) {
-          const resend = confirm('Your email is not verified. Would you like us to resend the verification email?');
-          if (resend) {
-            try {
-              await api.login(email, password).catch(() => {});
-              const res = await fetch('/api/auth/resend-verification', { 
-                method: 'POST', 
-                credentials: 'include',
-                headers: { 'Content-Type': 'application/json' }
-              });
-              if (res.ok) alert('Verification email sent! Check your inbox (and spam folder).');
-              else alert('Could not resend. Please try again later.');
-            } catch {
-              alert('Could not resend. Please try signing up again or contact support.');
-            }
-          }
-        } else {
-          alert(err.message); 
-        }
+        alert(err.message); 
       }
     });
   }
@@ -806,10 +788,7 @@ function initSignupPage() {
       const confirm = document.getElementById('reg-confirm')?.value;
       if (password !== confirm) { alert('Passwords do not match'); return; }
       try {
-        const result = await api.register(username, email, password);
-        if (result && result.needsVerification) {
-          alert('Account created! Please check your email (and spam folder) to verify your email address.');
-        }
+        await api.register(username, email, password);
         window.location.href = 'index.html';
       } catch (err) { alert(err.message); }
     });
