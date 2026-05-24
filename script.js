@@ -1,0 +1,702 @@
+const ADMIN_CODE = '04122010';
+const SHIPPING = 4.00;
+
+const api = {
+  async request(path, options = {}) {
+    const fetchOpts = { credentials: 'include', headers: { 'Content-Type': 'application/json' } };
+    Object.keys(options).forEach(k => { fetchOpts[k] = options[k]; });
+    const res = await fetch(path, fetchOpts);
+    const text = await res.text();
+    if (!text) throw new Error('Server returned empty response (make sure server is running on http://localhost:3000)');
+    try {
+      const data = JSON.parse(text);
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    } catch (e) {
+      if (e.name === 'SyntaxError') throw new Error('Invalid server response: ' + text.substring(0, 100));
+      throw e;
+    }
+  },
+  async checkAuth() { return this.request('/api/auth/me'); },
+  async login(email, password) { return this.request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }); },
+  async register(username, email, password) { return this.request('/api/auth/signup', { method: 'POST', body: JSON.stringify({ username, email, password }) }); },
+  async logout() { return this.request('/api/auth/logout', { method: 'POST' }); },
+  async getProducts() { return this.request('/api/products'); },
+  async getProduct(id) { return this.request(`/api/products/${id}`); },
+  async createProduct(formData) {
+    const res = await fetch('/api/products', { method: 'POST', credentials: 'include', body: formData });
+    const text = await res.text();
+    if (!text) throw new Error('Server empty response');
+    const data = JSON.parse(text);
+    if (!res.ok) throw new Error(data.error);
+    return data;
+  },
+  async updateProduct(id, formData) {
+    const res = await fetch(`/api/products/${id}`, { method: 'PUT', credentials: 'include', body: formData });
+    const text = await res.text();
+    if (!text) throw new Error('Server empty response');
+    const data = JSON.parse(text);
+    if (!res.ok) throw new Error(data.error);
+    return data;
+  },
+  async deleteProduct(id) { return this.request(`/api/products/${id}`, { method: 'DELETE' }); },
+  async getCart() { return this.request('/api/cart'); },
+  async addToCart(productId, quantity = 1) { return this.request('/api/cart', { method: 'POST', body: JSON.stringify({ product_id: productId, quantity }) }); },
+  async updateCartItem(itemId, quantity) { return this.request(`/api/cart/${itemId}`, { method: 'PUT', body: JSON.stringify({ quantity }) }); },
+  async removeCartItem(itemId) { return this.request(`/api/cart/${itemId}`, { method: 'DELETE' }); },
+  async getWishlist() { return this.request('/api/wishlist'); },
+  async addToWishlist(productId) { return this.request('/api/wishlist', { method: 'POST', body: JSON.stringify({ product_id: productId }) }); },
+  async removeFromWishlist(productId) { return this.request(`/api/wishlist/${productId}`, { method: 'DELETE' }); },
+  async createCheckoutSession() { return this.request('/api/create-checkout-session', { method: 'POST' }); },
+  async createOrder() { return this.request('/api/create-order', { method: 'POST' }); },
+  async getOrders() { return this.request('/api/orders'); },
+  async getAdminStats() { return this.request('/api/admin/stats'); },
+  async getAdminOrders() { return this.request('/api/admin/orders'); },
+  async subscribeNewsletter(email) { return this.request('/api/newsletter', { method: 'POST', body: JSON.stringify({ email }) }); }
+};
+
+// ─── Auth ───────────────────────────────────────────────
+async function checkAuth() {
+  try { const data = await api.checkAuth(); return data.user; }
+  catch { return null; }
+}
+
+function isAdminMode() { return localStorage.getItem('admin_mode') === 'true'; }
+function setAdminMode(val) {
+  if (val) localStorage.setItem('admin_mode', 'true');
+  else localStorage.removeItem('admin_mode');
+  updateAdminUI();
+  if (!val && window.location.pathname.includes('dashboard.html')) window.location.href = 'index.html';
+}
+
+function updateAdminUI() {
+  const admin = isAdminMode();
+  const fab = document.getElementById('admin-fab');
+  if (fab) fab.style.display = admin ? 'flex' : 'none';
+  if (admin) showAdminBanner();
+  else hideAdminBanner();
+}
+
+function showAdminBanner() {
+  let banner = document.getElementById('admin-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'admin-banner';
+    banner.className = 'admin-banner';
+    banner.innerHTML = `Admin Mode Active <button onclick="showAdminModal()">+ Add Product</button> <button onclick="window.location.href='dashboard.html'">Dashboard</button> <button onclick="setAdminMode(false)">Exit Admin</button>`;
+    document.body.prepend(banner);
+  }
+  banner.style.display = 'flex';
+}
+
+function hideAdminBanner() {
+  const b = document.getElementById('admin-banner');
+  if (b) b.style.display = 'none';
+}
+
+function updateNavbar(user) {
+  const authLink = document.getElementById('auth-link');
+  if (!authLink) return;
+  const page = window.location.pathname.split('/').pop() || 'index.html';
+
+  if (user) {
+    if (page === 'dashboard.html' && !isAdminMode()) { window.location.href = 'index.html'; return; }
+    authLink.innerHTML = `<a href="#" id="logoutBtn">${user.username} (Logout)</a>`;
+    document.getElementById('logoutBtn')?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      localStorage.removeItem('admin_mode');
+      await api.logout();
+      window.location.reload();
+    });
+  } else {
+    authLink.innerHTML = `<a href="signup.html" id="signupBtn">Sign Up</a>`;
+  }
+
+  if (isAdminMode()) {
+    showAdminBanner();
+    let fab = document.getElementById('admin-fab');
+    if (!fab) {
+      fab = document.createElement('div');
+      fab.id = 'admin-fab'; fab.innerHTML = '+';
+      fab.addEventListener('click', () => { if (isAdminMode()) showAdminModal(); else promptAdminCode(); });
+      document.body.appendChild(fab);
+    }
+    fab.style.display = 'flex';
+  } else {
+    hideAdminBanner();
+    const fab = document.getElementById('admin-fab');
+    if (fab) fab.style.display = 'none';
+  }
+}
+
+function promptAdminCode() {
+  const code = prompt('Enter admin code to access dashboard:');
+  if (code === ADMIN_CODE) {
+    setAdminMode(true);
+    loadProducts();
+  } else if (code !== null) alert('Wrong code!');
+}
+
+// ─── Admin Product Edit Modal ──────────────────────────
+let editingProductId = null;
+
+function showEditModal(product) {
+  editingProductId = product.id;
+  let modal = document.getElementById('admin-modal');
+  if (!modal) createAdminModal();
+  modal = document.getElementById('admin-modal');
+  document.getElementById('modal-title').textContent = 'Edit Product';
+  document.getElementById('admin-form').querySelector('input[name="name"]').value = product.name || '';
+  document.getElementById('admin-form').querySelector('textarea[name="description"]').value = product.description || '';
+  document.getElementById('admin-form').querySelector('input[name="price"]').value = product.price || '';
+  document.getElementById('admin-form').querySelector('input[name="stock"]').value = product.stock || '';
+  document.getElementById('admin-form').querySelector('select[name="category"]').value = product.category || 'Figure';
+  document.getElementById('admin-submit-btn').textContent = 'Update Product';
+  modal.style.display = 'flex';
+}
+
+function showAdminModal() {
+  if (!isAdminMode()) { promptAdminCode(); return; }
+  editingProductId = null;
+  let modal = document.getElementById('admin-modal');
+  if (!modal) createAdminModal();
+  modal = document.getElementById('admin-modal');
+  document.getElementById('modal-title').textContent = 'Create Product';
+  document.getElementById('admin-form').reset();
+  document.getElementById('admin-submit-btn').textContent = 'Create Product';
+  modal.style.display = 'flex';
+}
+
+function createAdminModal() {
+  const modal = document.createElement('div');
+  modal.id = 'admin-modal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <h2 id="modal-title">Create Product</h2>
+      <form id="admin-form">
+        <div class="form-group"><label>Product Name *</label><input type="text" name="name" required></div>
+        <div class="form-group"><label>Description</label><textarea name="description" rows="3"></textarea></div>
+        <div class="form-row">
+          <div class="form-group"><label>Price *</label><input type="number" name="price" step="0.01" min="0" required></div>
+          <div class="form-group"><label>Stock</label><input type="number" name="stock" min="0" value="1"></div>
+        </div>
+        <div class="form-group"><label>Category</label><select name="category"><option>Figure</option><option>Cosplay</option><option>Stand</option><option>Other</option></select></div>
+        <div class="form-group"><label>Image</label><input type="file" name="image" accept="image/*"></div>
+        <button type="submit" class="modal-submit" id="admin-submit-btn">Create Product</button>
+      </form>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('.modal-close').addEventListener('click', hideAdminModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) hideAdminModal(); });
+  document.getElementById('admin-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const formData = new FormData(form);
+    try {
+      if (editingProductId) { await api.updateProduct(editingProductId, formData); }
+      else { await api.createProduct(formData); }
+      hideAdminModal();
+      form.reset();
+      editingProductId = null;
+      if (window.location.pathname.includes('dashboard.html')) loadDashboard();
+      else loadProducts();
+    } catch (err) { alert('Error: ' + err.message); }
+  });
+}
+
+function hideAdminModal() {
+  const m = document.getElementById('admin-modal');
+  if (m) m.style.display = 'none';
+}
+
+// ─── Products ──────────────────────────────────────────
+function renderProductCard(product) {
+  const imgSrc = product.image || 'img/button.png';
+  const stars = '<i class="fas fa-star"></i>'.repeat(5);
+  const admin = isAdminMode();
+  return `<div class="pro" data-id="${product.id}">
+    <img src="${imgSrc}" alt="${product.name}" onclick="window.location.href='sproduct.html?id=${product.id}'" style="cursor:pointer">
+    <div class="des">
+      <span>${product.category || 'Figure'}</span>
+      <h5 onclick="window.location.href='sproduct.html?id=${product.id}'" style="cursor:pointer">${product.name}</h5>
+      <div class="star">${stars}</div>
+      <h4>€${parseFloat(product.price).toFixed(2)}</h4>
+    </div>
+    <a href="#" class="cart-link" data-id="${product.id}"><i class="fa-solid fa-cart-plus cart"></i></a>
+    <a href="#" class="wish-link" data-id="${product.id}" title="Add to wishlist"><i class="fa-regular fa-heart" style="position:absolute;top:10px;right:10px;font-size:20px;color:#e74c3c;z-index:5"></i></a>
+    ${admin ? `<button class="edit-btn" data-id="${product.id}"><i class="fa-solid fa-pen"></i></button>` : ''}
+    ${admin ? `<button class="delete-btn" data-id="${product.id}"><i class="fa-solid fa-trash"></i></button>` : ''}
+  </div>`;
+}
+
+async function loadProducts() {
+  try {
+    const data = await api.getProducts();
+    const products = data.products;
+    const singleBottom = document.querySelector('#product1.single-bottom .pro-container');
+    const featured = document.querySelector('#product1:not(.new):not(.single-bottom) .pro-container');
+    const newSection = document.querySelector('#product1.new .pro-container');
+    if (singleBottom) singleBottom.innerHTML = products.slice(0, 4).map(p => renderProductCard(p)).join('');
+    else if (featured) featured.innerHTML = products.slice(0, 8).map(p => renderProductCard(p)).join('');
+    if (newSection) newSection.innerHTML = products.slice(8).map(p => renderProductCard(p)).join('');
+
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!isAdminMode()) { promptAdminCode(); return; }
+        if (confirm('Delete this product?')) {
+          try { await api.deleteProduct(parseInt(btn.dataset.id)); loadProducts(); }
+          catch (err) { alert('Error: ' + err.message); }
+        }
+      });
+    });
+    document.querySelectorAll('.edit-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!isAdminMode()) { promptAdminCode(); return; }
+        const id = parseInt(btn.dataset.id);
+        try { const d = await api.getProduct(id); showEditModal(d.product); }
+        catch (err) { alert('Error: ' + err.message); }
+      });
+    });
+  } catch (err) { console.error('Failed to load products:', err); }
+}
+
+// ─── Cart Events (Delegated) ──────────────────────────
+document.addEventListener('click', async (e) => {
+  const link = e.target.closest('.cart-link');
+  if (link) {
+    e.preventDefault();
+    const productId = parseInt(link.dataset.id);
+    const user = await checkAuth();
+    if (!user) { window.location.href = 'signup.html'; return; }
+    try {
+      await api.addToCart(productId);
+      showToast('Added to cart!');
+    } catch (err) { alert('Error: ' + err.message); }
+  }
+
+  const wish = e.target.closest('.wish-link');
+  if (wish) {
+    e.preventDefault();
+    const productId = parseInt(wish.dataset.id);
+    const user = await checkAuth();
+    if (!user) { window.location.href = 'signup.html'; return; }
+    try {
+      await api.addToWishlist(productId);
+      showToast('Added to wishlist!');
+    } catch (err) { alert('Error: ' + err.message); }
+  }
+});
+
+function showToast(msg) {
+  const t = document.getElementById('cart-toast') || (() => {
+    const el = document.createElement('div'); el.id = 'cart-toast'; el.className = 'cart-toast';
+    document.body.appendChild(el); return el;
+  })();
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ─── Single Product ───────────────────────────────────
+async function loadSingleProduct() {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get('id');
+  if (!id) return;
+  try {
+    const d = await api.getProduct(id);
+    const p = d.product;
+    if (!p) return;
+    document.getElementById('MainImg').src = p.image || 'img/button.png';
+    document.querySelector('.single-pro-details h4').textContent = p.category || 'Figure';
+    document.querySelector('.single-pro-details h2').textContent = '€' + parseFloat(p.price).toFixed(2);
+    document.querySelector('.single-pro-details h6').textContent = 'Home / ' + (p.category || 'Figures');
+    document.querySelector('.single-pro-details span').textContent = p.description || 'No description available.';
+    const qtyInput = document.querySelector('.single-pro-details input[type="number"]');
+    const addBtn = document.querySelector('.single-pro-details .normal');
+    if (addBtn) {
+      addBtn.onclick = async () => {
+        const user = await checkAuth();
+        if (!user) { window.location.href = 'signup.html'; return; }
+        try { await api.addToCart(p.id, parseInt(qtyInput?.value) || 1); showToast('Added to cart!'); }
+        catch (err) { alert('Error: ' + err.message); }
+      };
+    }
+    const smallImgs = document.querySelectorAll('.small-img');
+    if (smallImgs.length > 0) {
+      smallImgs[0].src = p.image || 'img/button.png';
+      smallImgs[0].onclick = function () { document.getElementById('MainImg').src = this.src; };
+      for (let i = 1; i < smallImgs.length; i++) {
+        smallImgs[i].src = 'img/products/f' + (i + 1) + '.jpg';
+        smallImgs[i].onclick = function () { document.getElementById('MainImg').src = this.src; };
+      }
+    }
+    loadProducts();
+  } catch (err) { console.error(err); }
+}
+
+// ─── Cart Page ────────────────────────────────────────
+async function loadCartPage() {
+  const user = await checkAuth();
+  const tbody = document.querySelector('#cart tbody');
+  const subtotalEl = document.querySelector('#subtotal table');
+  const totalEl = document.querySelector('#subtotal table tr:last-child td:last-child');
+
+  if (!user) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px">Please <a href="signup.html">sign in</a> to view your cart.</td></tr>';
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('success') === 'true') {
+    try {
+      await api.createOrder();
+      showToast('Payment successful! Order placed.');
+    } catch (e) {}
+    window.history.replaceState({}, '', 'cart.html');
+  }
+
+  try {
+    const d = await api.getCart();
+    const items = d.items || [];
+
+    if (!items.length) {
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:40px">Your cart is empty.</td></tr>';
+      updateTotals(0, subtotalEl, totalEl);
+      return;
+    }
+
+    if (tbody) {
+      tbody.innerHTML = items.map(p => `<tr>
+        <td><i class="fa-regular fa-circle-xmark remove-item" data-itemid="${p.id}"></i></td>
+        <td><img src="${p.image || 'img/button.png'}" alt="${p.name}" style="width:80px"></td>
+        <td>${p.name}</td>
+        <td>€${parseFloat(p.price).toFixed(2)}</td>
+        <td><input type="number" class="cart-qty" data-itemid="${p.id}" value="${p.quantity}" min="1"></td>
+        <td>€${(parseFloat(p.price) * p.quantity).toFixed(2)}</td>
+      </tr>`).join('');
+    }
+
+    const sub = items.reduce((s, i) => s + parseFloat(i.price) * i.quantity, 0);
+    updateTotals(sub, subtotalEl, totalEl);
+
+    tbody?.querySelectorAll('.remove-item').forEach(el => {
+      el.addEventListener('click', async () => {
+        try { await api.removeCartItem(parseInt(el.dataset.itemid)); loadCartPage(); }
+        catch (err) { alert(err.message); }
+      });
+    });
+    tbody?.querySelectorAll('.cart-qty').forEach(input => {
+      input.addEventListener('change', async () => {
+        const qty = parseInt(input.value);
+        if (qty < 1) { input.value = 1; return; }
+        try { await api.updateCartItem(parseInt(input.dataset.itemid), qty); loadCartPage(); }
+        catch (err) { alert(err.message); }
+      });
+    });
+  } catch (err) { console.error(err); }
+}
+
+function updateTotals(subtotal, subtotalEl, totalEl) {
+  if (!subtotalEl) return;
+  const rows = subtotalEl.querySelectorAll('tr');
+  if (rows.length >= 3) {
+    rows[0].querySelector('td:last-child').textContent = '€' + subtotal.toFixed(2);
+    rows[1].querySelector('td:last-child').textContent = '€' + SHIPPING.toFixed(2);
+    rows[2].querySelector('td:last-child').textContent = '€' + (subtotal + SHIPPING).toFixed(2);
+  }
+}
+
+// ─── Wishlist Page ────────────────────────────────────
+async function loadWishlistPage() {
+  const user = await checkAuth();
+  const container = document.getElementById('wishlist-container');
+  if (!container) return;
+  if (!user) { container.innerHTML = '<p style="text-align:center;width:100%;padding:40px">Please <a href="signup.html">sign in</a> to view your wishlist.</p>'; return; }
+  try {
+    const d = await api.getWishlist();
+    const items = d.items || [];
+    if (!items.length) { container.innerHTML = '<p style="text-align:center;width:100%;padding:40px">Your wishlist is empty.</p>'; return; }
+    container.innerHTML = items.map(p => `<div class="pro">
+      <img src="${p.image || 'img/button.png'}" alt="${p.name}" onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">
+      <div class="des">
+        <span>Wishlist</span>
+        <h5 onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">${p.name}</h5>
+        <div class="star"><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i></div>
+        <h4>€${parseFloat(p.price).toFixed(2)}</h4>
+      </div>
+      <a href="#" class="cart-link" data-id="${p.product_id}"><i class="fa-solid fa-cart-plus cart"></i></a>
+      <button class="delete-btn" style="opacity:1" data-wishid="${p.product_id}" title="Remove from wishlist"><i class="fa-solid fa-trash"></i></button>
+    </div>`).join('');
+    container.querySelectorAll('[data-wishid]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try { await api.removeFromWishlist(parseInt(btn.dataset.wishid)); loadWishlistPage(); }
+        catch (err) { alert(err.message); }
+      });
+    });
+  } catch (err) { console.error(err); }
+}
+
+// ─── Orders Page ──────────────────────────────────────
+async function loadOrdersPage() {
+  const user = await checkAuth();
+  const container = document.getElementById('orders-list');
+  if (!container) return;
+  if (!user) { container.innerHTML = '<p style="text-align:center;padding:40px">Please <a href="signup.html">sign in</a> to view your orders.</p>'; return; }
+  try {
+    const d = await api.getOrders();
+    const orders = d.orders || [];
+    if (!orders.length) { container.innerHTML = '<p style="text-align:center;padding:40px">No orders yet.</p>'; return; }
+    container.innerHTML = orders.map(o => `<div class="order-card">
+      <div class="order-header"><strong>${o.order_code}</strong> <span class="order-status ${o.status}">${o.status}</span></div>
+      <div class="order-body">
+        <p>${o.items.map(i => `${i.name} x${i.quantity}`).join(', ')}</p>
+        <p><strong>Total:</strong> €${o.total.toFixed(2)} | <strong>Date:</strong> ${new Date(o.created_at).toLocaleDateString()}</p>
+      </div>
+    </div>`).join('');
+  } catch (err) { console.error(err); }
+}
+
+// ─── Checkout (Stripe) ────────────────────────────────
+async function handleCheckout() {
+  const user = await checkAuth();
+  if (!user) { window.location.href = 'signup.html'; return; }
+  try {
+    const d = await api.createCheckoutSession();
+    if (d.url) window.location.href = d.url;
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+// ─── Newsletter ───────────────────────────────────────
+function initNewsletter() {
+  const forms = document.querySelectorAll('.newsletter-form');
+  forms.forEach(form => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = form.querySelector('input[type="text"], input[type="email"]');
+      const email = input?.value.trim();
+      if (!email) { alert('Please enter your email'); return; }
+      try {
+        await api.subscribeNewsletter(email);
+        alert('Subscribed to newsletter!');
+        input.value = '';
+      } catch (err) { alert(err.message); }
+    });
+  });
+}
+
+// ─── Dashboard ────────────────────────────────────────
+async function loadDashboard() {
+  if (!isAdminMode()) { window.location.href = 'index.html'; return; }
+  try {
+    const d = await api.getAdminStats();
+    const stats = d.stats;
+    document.getElementById('stat-revenue').textContent = '€' + (stats.totalRevenue || 0).toFixed(2);
+    document.getElementById('stat-orders').textContent = stats.totalOrders || 0;
+    document.getElementById('stat-products').textContent = stats.totalProducts || 0;
+
+    const months = Object.entries(stats.monthlyRevenue || {});
+    const chart = document.getElementById('revenue-chart');
+    if (chart) {
+      const max = Math.max(...months.map(([, v]) => v), 1);
+      chart.innerHTML = months.map(([k, v]) => {
+        const pct = (v / max) * 100;
+        return `<div class="chart-bar"><div class="bar" style="height:${Math.max(pct, 2)}%"></div><span>${k.split('-')[1]}</span><span class="bar-val">€${v.toFixed(0)}</span></div>`;
+      }).join('');
+    }
+
+    const recent = document.getElementById('recent-orders');
+    if (recent) {
+      const orders = d.orders || [];
+      if (!orders.length) recent.innerHTML = '<p>No orders yet.</p>';
+      else recent.innerHTML = orders.map(o => `<div class="order-card"><div class="order-header"><strong>${o.order_code}</strong> by ${o.username} <span class="order-status ${o.status}">${o.status}</span></div><div class="order-body">€${o.total.toFixed(2)} - ${new Date(o.created_at).toLocaleDateString()}</div></div>`).join('');
+    }
+
+    const subs = document.getElementById('stat-subs');
+    if (subs) {
+      const subRes = await fetch('/api/newsletter');
+      const subData = await subRes.text();
+      try { const sd = JSON.parse(subData); /* not a real endpoint for count, skip */ } catch(e) {}
+    }
+  } catch (err) { console.error('Dashboard error:', err); }
+}
+
+async function loadDashboardOrders() {
+  try {
+    const d = await api.getAdminOrders();
+    const orders = d.orders || [];
+    const tbody = document.querySelector('#orders-table tbody');
+    if (!tbody) return;
+    if (!orders.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:30px">No orders</td></tr>'; return; }
+    tbody.innerHTML = orders.map(o => `<tr>
+      <td><strong>${o.order_code}</strong></td>
+      <td>${o.username}</td>
+      <td>${o.items.map(i => i.name).join(', ')}</td>
+      <td>€${o.total.toFixed(2)}</td>
+      <td><span class="order-status ${o.status}">${o.status}</span></td>
+      <td>${new Date(o.created_at).toLocaleString()}</td>
+    </tr>`).join('');
+  } catch (err) { console.error(err); }
+}
+
+async function loadDashboardProducts() {
+  try {
+    const d = await api.getProducts();
+    const products = d.products || [];
+    const tbody = document.querySelector('#products-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = products.map(p => `<tr>
+      <td><img src="${p.image || 'img/button.png'}" style="width:50px;height:50px;object-fit:cover;border-radius:8px"></td>
+      <td>${p.name}</td>
+      <td>€${parseFloat(p.price).toFixed(2)}</td>
+      <td>${p.stock}</td>
+      <td>${p.category || 'Figure'}</td>
+      <td>
+        <button class="edit-btn" style="opacity:1;position:static;display:inline-block;width:auto;height:auto;padding:4px 10px;border-radius:4px;margin-right:5px" data-pid="${p.id}"><i class="fa-solid fa-pen"></i></button>
+        <button class="delete-btn" style="opacity:1;position:static;display:inline-block;width:auto;height:auto;padding:4px 10px;border-radius:4px" data-pid="${p.id}"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`).join('');
+    tbody.querySelectorAll('.edit-btn[data-pid]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try { const d2 = await api.getProduct(parseInt(btn.dataset.pid)); showEditModal(d2.product); }
+        catch (err) { alert(err.message); }
+      });
+    });
+    tbody.querySelectorAll('.delete-btn[data-pid]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Delete this product?')) {
+          try { await api.deleteProduct(parseInt(btn.dataset.pid)); loadDashboardProducts(); }
+          catch (err) { alert(err.message); }
+        }
+      });
+    });
+  } catch (err) { console.error(err); }
+}
+
+async function loadDashboardNewsletter() {
+  try {
+    const d = await api.getAdminStats();
+    const tbody = document.querySelector('#newsletter-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;padding:30px">Newsletter emails are collected on the server. Check data.json for the full list.</td></tr>';
+  } catch (err) { console.error(err); }
+}
+
+// ─── Dashboard Tab Switching ──────────────────────────
+function initDashboard() {
+  document.querySelectorAll('.dash-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.dash-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.dash-content').forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      const target = document.getElementById('dash-' + tab.dataset.tab);
+      if (target) target.classList.add('active');
+      if (tab.dataset.tab === 'overview') loadDashboard();
+      if (tab.dataset.tab === 'orders') loadDashboardOrders();
+      if (tab.dataset.tab === 'products') loadDashboardProducts();
+      if (tab.dataset.tab === 'newsletter') loadDashboardNewsletter();
+    });
+  });
+  loadDashboard();
+  loadDashboardOrders();
+}
+
+// ─── Signup ───────────────────────────────────────────
+function initSignupPage() {
+  const loginForm = document.getElementById('login-form');
+  const registerForm = document.getElementById('register-form');
+  const showRegister = document.getElementById('show-register');
+  const showLogin = document.getElementById('show-login');
+  const formTitle = document.getElementById('form-title');
+
+  if (showRegister) {
+    showRegister.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (loginForm) loginForm.style.display = 'none';
+      if (registerForm) registerForm.style.display = 'block';
+      if (formTitle) formTitle.textContent = 'Create Account';
+    });
+  }
+  if (showLogin) {
+    showLogin.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (registerForm) registerForm.style.display = 'none';
+      if (loginForm) loginForm.style.display = 'block';
+      if (formTitle) formTitle.textContent = 'Sign In';
+    });
+  }
+  if (loginForm) {
+    loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('login-email')?.value;
+      const password = document.getElementById('login-password')?.value;
+      if (!email || !password) { alert('Please fill in all fields'); return; }
+      try { await api.login(email, password); window.location.href = 'index.html'; }
+      catch (err) { alert(err.message); }
+    });
+  }
+  if (registerForm) {
+    registerForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('reg-username')?.value;
+      const email = document.getElementById('reg-email')?.value;
+      const password = document.getElementById('reg-password')?.value;
+      const confirm = document.getElementById('reg-confirm')?.value;
+      const code = document.getElementById('reg-admin-code')?.value;
+      if (password !== confirm) { alert('Passwords do not match'); return; }
+      try {
+        await api.register(username, email, password);
+        if (code === ADMIN_CODE) setAdminMode(true);
+        window.location.href = 'index.html';
+      } catch (err) { alert(err.message); }
+    });
+  }
+}
+
+// ─── Admin Panel Button in Nav ───────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const nav = document.getElementById('navbar');
+  if (nav) {
+    const adminLi = document.createElement('li');
+    adminLi.innerHTML = '<a href="#" id="admin-panel-btn" style="color:#088178;font-weight:700">Admin</a>';
+    const authLink = document.getElementById('auth-link');
+    if (authLink) authLink.parentNode.insertBefore(adminLi, authLink);
+    document.getElementById('admin-panel-btn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (isAdminMode()) {
+        if (window.location.pathname.includes('dashboard.html')) showAdminModal();
+        else window.location.href = 'dashboard.html';
+      } else { promptAdminCode(); }
+    });
+  }
+});
+
+// ─── Init ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  const page = window.location.pathname.split('/').pop() || 'index.html';
+  const user = await checkAuth();
+  updateNavbar(user);
+
+  const bar = document.getElementById('bar');
+  const close = document.getElementById('close');
+  const nav = document.getElementById('navbar');
+  if (bar) bar.addEventListener('click', () => nav?.classList.add('active'));
+  if (close) close.addEventListener('click', () => nav?.classList.remove('active'));
+
+  if (['index.html', '', '/'].includes(page)) loadProducts();
+  if (page === 'shop.html') loadProducts();
+  if (page === 'cart.html') { loadCartPage(); initNewsletter(); }
+  if (page === 'sproduct.html') loadSingleProduct();
+  if (page === 'signup.html') initSignupPage();
+  if (page === 'wishlist.html') loadWishlistPage();
+  if (page === 'orders.html') loadOrdersPage();
+  if (page === 'dashboard.html') { initDashboard(); }
+
+  initNewsletter();
+
+  const checkoutBtn = document.getElementById('checkout-btn');
+  if (checkoutBtn) checkoutBtn.addEventListener('click', handleCheckout);
+});
