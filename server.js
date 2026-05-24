@@ -798,24 +798,14 @@ app.post('/api/admin/clear-users', requireAdmin, async (req, res) => {
 });
 
 // ─── Debug endpoint ────────────────────────────────────────
-app.get('/api/debug', async (req, res) => {
-  let smtpVerify = null;
-  if (transporter) {
-    try {
-      await transporter.verify();
-      smtpVerify = 'ok';
-    } catch (err) {
-      smtpVerify = err.message;
-    }
-  }
+app.get('/api/debug', (req, res) => {
   res.json({
     smtp: !!transporter,
-    smtp_verify: smtpVerify,
-    smtp_host: process.env.SMTP_HOST,
-    smtp_port: process.env.SMTP_PORT,
-    smtp_secure: process.env.SMTP_SECURE,
-    smtp_user: process.env.SMTP_USER,
-    smtp_from: process.env.SMTP_FROM,
+    smtp_host: process.env.SMTP_HOST || '(not set)',
+    smtp_port: process.env.SMTP_PORT || '(not set)',
+    smtp_secure: process.env.SMTP_SECURE || '(not set)',
+    smtp_user: process.env.SMTP_USER ? '✓ set' : '(not set)',
+    smtp_from: process.env.SMTP_FROM || '(not set)',
     session: req.session ? { userId: req.session.userId, isAdmin: req.session.isAdmin } : null,
   });
 });
