@@ -7,6 +7,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const https = require('https');
 const nodemailer = require('nodemailer');
 const supabase = require('./supabase');
 
@@ -18,14 +19,67 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT) || 587,
     secure: process.env.SMTP_SECURE === 'true',
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
+    connectionTimeout: 8000,
+    greetingTimeout: 8000,
+    socketTimeout: 10000,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
   });
+}
+
+function sendEmailViaBrevo(to, subject, htmlContent) {
+  return new Promise((resolve, reject) => {
+    const apiKey = process.env.SMTP_PASS;
+    if (!apiKey) return reject(new Error('No SMTP password/key configured'));
+
+    const fromEmail = process.env.SMTP_FROM || 'jj3dprintshop@gmail.com';
+    const data = JSON.stringify({
+      sender: { name: "JJ's 3D Shop", email: fromEmail },
+      to: Array.isArray(to) ? to.map(e => ({ email: e })) : [{ email: to }],
+      subject,
+      htmlContent
+    });
+
+    const req = https.request({
+      hostname: 'api.brevo.com',
+      path: '/v3/smtp/email',
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+        'Accept': 'application/json'
+      },
+      timeout: 15000
+    }, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 201 || res.statusCode === 200) return resolve(true);
+        reject(new Error('Brevo API error ' + res.statusCode + ': ' + body));
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Brevo API timeout')); });
+    req.write(data);
+    req.end();
+  });
+}
+
+async function sendEmail(to, subject, htmlContent) {
+  if (transporter) {
+    try {
+      const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER || 'jj3dprintshop@gmail.com';
+      await transporter.sendMail({ from: `"JJ's 3D Shop" <${fromEmail}>`, to, subject, html: htmlContent });
+      return;
+    } catch (err) {
+      console.log('SMTP failed, trying Brevo API:', err.message);
+    }
+  }
+  await sendEmailViaBrevo(to, subject, htmlContent);
 }
 
 function getAppUrl(req) {
@@ -36,35 +90,29 @@ function getAppUrl(req) {
 }
 
 async function sendVerificationEmail(req, user, token) {
-  if (!transporter) {
-    console.log('Email verification skipped: No SMTP configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env');
+  if (!process.env.SMTP_PASS) {
+    console.log('Email verification skipped: No email credentials configured');
     return;
   }
   const baseUrl = getAppUrl(req);
   const verifyUrl = `${baseUrl}/verify-email?token=${token}`;
   
-  const mailOptions = {
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to: user.email,
-    subject: 'Verify your email - JJ\'s 3D Shop',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Welcome to JJ's 3D Shop!</h2>
-        <p>Hi ${user.username},</p>
-        <p>Thank you for registering. Please verify your email by clicking the button below:</p>
-        <div style="margin: 30px 0; text-align: center;">
-          <a href="${verifyUrl}" style="background: #088178; color: white; padding: 15px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
-            Verify Email Address
-          </a>
-        </div>
-        <p>Or copy and paste this link: <br><small style="color: #666; word-break: break-all;">${verifyUrl}</small></p>
-        <p style="color: #888; font-size: 12px; margin-top: 30px;">This link expires in 24 hours.</p>
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>Welcome to JJ's 3D Shop!</h2>
+      <p>Hi ${user.username},</p>
+      <p>Thank you for registering. Please verify your email by clicking the button below:</p>
+      <div style="margin: 30px 0; text-align: center;">
+        <a href="${verifyUrl}" style="background: #088178; color: white; padding: 15px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          Verify Email Address
+        </a>
       </div>
-    `,
-  };
+      <p>Or copy and paste this link: <br><small style="color: #666; word-break: break-all;">${verifyUrl}</small></p>
+      <p style="color: #888; font-size: 12px; margin-top: 30px;">This link expires in 24 hours.</p>
+    </div>`;
   
   try {
-    await transporter.sendMail(mailOptions);
+    await sendEmail(user.email, 'Verify your email - JJ\'s 3D Shop', html);
     console.log('Verification email sent to:', user.email);
   } catch (err) {
     console.error('Failed to send verification email:', err.message);
@@ -215,7 +263,7 @@ app.get('/verify-email', async (req, res) => {
 
 app.post('/api/auth/resend-verification', requireAuth, async (req, res) => {
   try {
-    if (!transporter) return res.status(400).json({ error: 'Email not configured on this server' });
+    if (!process.env.SMTP_PASS) return res.status(400).json({ error: 'Email not configured on this server' });
     
     const { data: user } = await supabase.from('users').select('*').eq('id', req.session.userId).maybeSingle();
     if (!user) return res.status(401).json({ error: 'User not found' });
@@ -691,13 +739,16 @@ app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
   try {
     const { subject, message } = req.body;
     if (!subject || !message) return res.status(400).json({ error: 'Subject and message required' });
-    if (!transporter) return res.status(400).json({ error: 'Email not configured. Add SMTP env vars in Render dashboard.' });
+    if (!process.env.SMTP_PASS) return res.status(400).json({ error: 'Email not configured. Add SMTP env vars in Render dashboard.' });
 
     const { data: subscribers } = await supabase.from('newsletters').select('email');
     if (!subscribers || subscribers.length === 0) return res.status(400).json({ error: 'No subscribers' });
 
-    const fromName = "JJ's 3D Shop";
-    const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+      <h2 style="color:#088178;">${subject}</h2>
+      <p>${message.replace(/\n/g, '<br>')}</p>
+      <hr><p style="color:#888;font-size:12px;">You're receiving this because you subscribed to JJ's 3D Shop.</p>
+    </div>`;
 
     const emails = subscribers.map(s => s.email);
     let sent = 0;
@@ -705,19 +756,10 @@ app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
 
     for (const email of emails) {
       try {
-        await transporter.sendMail({
-          from: `"${fromName}" <${fromEmail}>`,
-          to: email,
-          subject: subject,
-          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-            <h2 style="color:#088178;">${subject}</h2>
-            <p>${message.replace(/\n/g, '<br>')}</p>
-            <hr><p style="color:#888;font-size:12px;">You're receiving this because you subscribed to JJ's 3D Shop.</p>
-          </div>`
-        });
+        await sendEmail(email, subject, html);
         sent++;
       } catch (err) {
-        lastErr = err.message + ' (code: ' + (err.code || 'none') + ')';
+        lastErr = err.message;
         console.error('Send failed to', email, ':', lastErr);
       }
     }
@@ -726,24 +768,19 @@ app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
       return res.status(500).json({ error: 'Failed to send any emails. Last error: ' + lastErr, sent: 0 });
     }
 
-    res.json({ success: true, sent: sent, total: emails.length });
+    res.json({ success: true, sent, total: emails.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ─── Admin test email ──────────────────────────────────────
 app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
   try {
-    if (!transporter) return res.status(400).json({ error: 'Email not configured.' });
-    const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-    await transporter.sendMail({
-      from: `"JJ's 3D Shop" <${fromEmail}>`,
-      to: fromEmail,
-      subject: 'Test email from JJ\'s 3D Shop',
-      html: '<p>If you see this, email sending works!</p>'
-    });
-    res.json({ success: true, message: 'Test email sent to ' + fromEmail });
+    if (!process.env.SMTP_PASS) return res.status(400).json({ error: 'Email not configured.' });
+    const toEmail = process.env.SMTP_FROM || process.env.SMTP_USER || 'jj3dprintshop@gmail.com';
+    await sendEmail(toEmail, 'Test email from JJ\'s 3D Shop', '<p>If you see this, email sending works!</p>');
+    res.json({ success: true, message: 'Test email sent to ' + toEmail });
   } catch (err) {
-    res.status(500).json({ error: 'Test email failed: ' + err.message + ' (code: ' + (err.code || 'none') + ')' });
+    res.status(500).json({ error: 'Test email failed: ' + err.message });
   }
 });
 
@@ -761,23 +798,18 @@ app.post('/api/contact', async (req, res) => {
       return res.status(500).json({ error: 'Failed to save message: ' + dbError.message + '. Make sure the contact_messages table exists in Supabase.' });
     }
 
-    if (transporter) {
+    if (process.env.SMTP_PASS) {
       try {
-        const adminEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-        await transporter.sendMail({
-          from: `"JJ's 3D Shop" <${process.env.SMTP_USER}>`,
-          replyTo: email,
-          to: adminEmail,
-          subject: `Contact Form: ${subject || 'General Inquiry'} - from ${name}`,
-          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-            <h2>New Contact Form Submission</h2>
-            <p><strong>Name:</strong> ${name}</p>
-            <p><strong>Email:</strong> ${email}</p>
-            <p><strong>Subject:</strong> ${subject || 'General Inquiry'}</p>
-            <p><strong>Message:</strong></p>
-            <p>${message.replace(/\n/g, '<br>')}</p>
-          </div>`
-        });
+        const adminEmail = process.env.SMTP_FROM || process.env.SMTP_USER || 'jj3dprintshop@gmail.com';
+        const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+          <h2>New Contact Form Submission</h2>
+          <p><strong>Name:</strong> ${name}</p>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Subject:</strong> ${subject || 'General Inquiry'}</p>
+          <p><strong>Message:</strong></p>
+          <p>${message.replace(/\n/g, '<br>')}</p>
+        </div>`;
+        await sendEmail(adminEmail, `Contact Form: ${subject || 'General Inquiry'} - from ${name}`, html);
       } catch (emailErr) {
         console.error('Contact email notification failed:', emailErr.message);
       }
