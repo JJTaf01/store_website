@@ -13,7 +13,7 @@ const supabase = require('./supabase');
 const app = express();
 
 let transporter = null;
-if (process.env.SMTP_HOST) {
+if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT) || 587,
@@ -22,12 +22,6 @@ if (process.env.SMTP_HOST) {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-  });
-  transporter.verify().then(() => {
-    console.log('SMTP connected successfully');
-  }).catch(err => {
-    console.error('SMTP connection failed:', err.message);
-    transporter = null;
   });
 }
 
