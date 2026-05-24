@@ -812,6 +812,8 @@ app.get('/api/debug', async (req, res) => {
     smtp: !!transporter,
     smtp_verify: smtpVerify,
     smtp_host: process.env.SMTP_HOST,
+    smtp_port: process.env.SMTP_PORT,
+    smtp_secure: process.env.SMTP_SECURE,
     smtp_user: process.env.SMTP_USER,
     smtp_from: process.env.SMTP_FROM,
     session: req.session ? { userId: req.session.userId, isAdmin: req.session.isAdmin } : null,
