@@ -61,6 +61,15 @@ CREATE TABLE wishlist_items (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE contact_messages (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  subject TEXT DEFAULT '',
+  message TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Seed products
 INSERT INTO products (name, description, price, stock, category, image) VALUES
 ('Nurse Silent Hill', 'A detailed 3D printed figure of the iconic Nurse from Silent Hill.', 19.99, 10, 'Figure', '/img/products/f1.jpg'),

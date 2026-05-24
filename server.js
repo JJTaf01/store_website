@@ -724,25 +724,46 @@ app.post('/api/contact', async (req, res) => {
     const { name, email, subject, message } = req.body;
     if (!name || !email || !message) return res.status(400).json({ error: 'Name, email, and message required' });
 
-    if (!transporter) return res.status(400).json({ error: 'Email not configured on this server' });
-
-    const adminEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-    await transporter.sendMail({
-      from: `"JJ's 3D Shop" <${process.env.SMTP_USER}>`,
-      replyTo: email,
-      to: adminEmail,
-      subject: `Contact Form: ${subject || 'General Inquiry'} - from ${name}`,
-      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-        <h2>New Contact Form Submission</h2>
-        <p><strong>Name:</strong> ${name}</p>
-        <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Subject:</strong> ${subject || 'General Inquiry'}</p>
-        <p><strong>Message:</strong></p>
-        <p>${message.replace(/\n/g, '<br>')}</p>
-      </div>`
+    const { error: dbError } = await supabase.from('contact_messages').insert({
+      name, email, subject: subject || '', message
     });
+    if (dbError) return res.status(500).json({ error: dbError.message });
+
+    if (transporter) {
+      try {
+        const adminEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+        await transporter.sendMail({
+          from: `"JJ's 3D Shop" <${process.env.SMTP_USER}>`,
+          replyTo: email,
+          to: adminEmail,
+          subject: `Contact Form: ${subject || 'General Inquiry'} - from ${name}`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+            <h2>New Contact Form Submission</h2>
+            <p><strong>Name:</strong> ${name}</p>
+            <p><strong>Email:</strong> ${email}</p>
+            <p><strong>Subject:</strong> ${subject || 'General Inquiry'}</p>
+            <p><strong>Message:</strong></p>
+            <p>${message.replace(/\n/g, '<br>')}</p>
+          </div>`
+        });
+      } catch (emailErr) {
+        console.error('Contact email notification failed:', emailErr.message);
+      }
+    }
 
     res.json({ success: true, message: 'Message sent successfully!' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/admin/contact-messages', requireAdmin, async (req, res) => {
+  try {
+    const { data: messages, error } = await supabase
+      .from('contact_messages')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ messages: messages || [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -761,8 +782,9 @@ app.post('/api/admin/clear-users', requireAdmin, async (req, res) => {
     await supabase.from('wishlist_items').delete().in('user_id', ids);
     await supabase.from('cart_items').delete().in('user_id', ids);
     await supabase.from('orders').delete().in('user_id', ids);
-    const { error } = await supabase.from('users').delete().in('id', ids);
-    if (error) return res.status(500).json({ error: error.message });
+    await supabase.from('users').delete().in('id', ids);
+    const { error: nlError } = await supabase.from('newsletters').delete().neq('email', 'jj3dprintshop@gmail.com');
+    if (nlError) console.error('Failed to clear newsletters:', nlError.message);
 
     res.json({ success: true, deleted: ids.length });
   } catch (err) { res.status(500).json({ error: err.message }); }

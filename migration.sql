@@ -19,6 +19,19 @@ DELETE FROM cart_items WHERE user_id IN (SELECT id FROM users WHERE email != 'jj
 DELETE FROM orders WHERE user_id IN (SELECT id FROM users WHERE email != 'jj3dprintshop@gmail.com');
 DELETE FROM users WHERE email != 'jj3dprintshop@gmail.com';
 
+-- Clear all newsletter subscribers (fresh start)
+DELETE FROM newsletters;
+
+-- Create contact_messages table for the chat/contact form
+CREATE TABLE IF NOT EXISTS contact_messages (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  subject TEXT DEFAULT '',
+  message TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Refresh the schema cache so Supabase picks up the new columns
 -- (run this in the Supabase SQL editor if the above doesn't resolve the issue)
 SELECT pg_catalog.pg_reload_conf();

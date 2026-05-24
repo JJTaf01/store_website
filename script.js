@@ -55,6 +55,7 @@ const api = {
   async subscribeNewsletter(email, username) { return this.request('/api/newsletter', { method: 'POST', body: JSON.stringify({ email, username }) }); },
   async getNewsletterSubscribers() { return this.request('/api/newsletter'); },
   async sendNewsletter(subject, message) { return this.request('/api/admin/send-newsletter', { method: 'POST', body: JSON.stringify({ subject, message }) }); },
+  async getContactMessages() { return this.request('/api/admin/contact-messages'); },
   async sendContactMessage(name, email, subject, message) { return this.request('/api/contact', { method: 'POST', body: JSON.stringify({ name, email, subject, message }) }); },
   async getShippingOptions() { return this.request('/api/shipping-options'); },
   async createCheckoutSession(shippingMethod) { return this.request('/api/create-checkout-session', { method: 'POST', body: JSON.stringify({ shipping_method: shippingMethod }) }); },
@@ -735,10 +736,31 @@ function initDashboard() {
       if (tab.dataset.tab === 'orders') loadDashboardOrders();
       if (tab.dataset.tab === 'products') loadDashboardProducts();
       if (tab.dataset.tab === 'newsletter') loadDashboardNewsletter();
+      if (tab.dataset.tab === 'messages') loadDashboardMessages();
     });
   });
   loadDashboard();
   loadDashboardOrders();
+}
+
+async function loadDashboardMessages() {
+  try {
+    const d = await api.getContactMessages();
+    const msgs = d.messages || [];
+    const tbody = document.querySelector('#messages-table tbody');
+    if (!tbody) return;
+    if (!msgs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:30px">No messages yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = msgs.map(m => `<tr>
+      <td style="white-space:nowrap">${new Date(m.created_at).toLocaleString()}</td>
+      <td>${escapeHtml(m.name)}</td>
+      <td><a href="mailto:${escapeHtml(m.email)}">${escapeHtml(m.email)}</a></td>
+      <td>${escapeHtml(m.subject || '-')}</td>
+      <td style="max-width:300px;word-break:break-word">${escapeHtml(m.message)}</td>
+    </tr>`).join('');
+  } catch (err) { console.error(err); }
 }
 
 // ─── Signup ───────────────────────────────────────────
