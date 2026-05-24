@@ -730,7 +730,10 @@ app.post('/api/contact', async (req, res) => {
     const { error: dbError } = await supabase.from('contact_messages').insert({
       name, email, subject: subject || '', message
     });
-    if (dbError) return res.status(500).json({ error: dbError.message });
+    if (dbError) {
+      console.error('Contact form DB error:', dbError.message);
+      return res.status(500).json({ error: 'Failed to save message: ' + dbError.message + '. Make sure the contact_messages table exists in Supabase.' });
+    }
 
     if (transporter) {
       try {
@@ -791,6 +794,17 @@ app.post('/api/admin/clear-users', requireAdmin, async (req, res) => {
 
     res.json({ success: true, deleted: ids.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Debug endpoint ────────────────────────────────────────
+app.get('/api/debug', (req, res) => {
+  res.json({
+    smtp: !!transporter,
+    smtp_host: !!process.env.SMTP_HOST,
+    smtp_user: !!process.env.SMTP_USER,
+    smtp_pass: !!process.env.SMTP_PASS,
+    session: req.session ? { userId: req.session.userId, isAdmin: req.session.isAdmin } : null,
+  });
 });
 
 // ─── Start ─────────────────────────────────────────────────
