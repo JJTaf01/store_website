@@ -6,6 +6,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMPTZ;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires TIMESTAMPTZ;
 
+-- Add username to newsletters table
+ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS username TEXT DEFAULT '';
+
+-- Add shipping fields to orders table
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_method TEXT DEFAULT '';
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_courier TEXT DEFAULT '';
+
 -- Refresh the schema cache so Supabase picks up the new columns
 -- (run this in the Supabase SQL editor if the above doesn't resolve the issue)
 SELECT pg_catalog.pg_reload_conf();

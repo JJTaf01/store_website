@@ -1,5 +1,6 @@
 const ADMIN_CODE = '04122010';
-const SHIPPING = 4.00;
+let shippingOptions = [];
+let selectedShipping = 'standard';
 
 const api = {
   async request(path, options = {}) {
@@ -52,7 +53,13 @@ const api = {
   async getOrders() { return this.request('/api/orders'); },
   async getAdminStats() { return this.request('/api/admin/stats'); },
   async getAdminOrders() { return this.request('/api/admin/orders'); },
-  async subscribeNewsletter(email) { return this.request('/api/newsletter', { method: 'POST', body: JSON.stringify({ email }) }); }
+  async subscribeNewsletter(email, username) { return this.request('/api/newsletter', { method: 'POST', body: JSON.stringify({ email, username }) }); },
+  async getNewsletterSubscribers() { return this.request('/api/newsletter'); },
+  async sendNewsletter(subject, message) { return this.request('/api/admin/send-newsletter', { method: 'POST', body: JSON.stringify({ subject, message }) }); },
+  async sendContactMessage(name, email, subject, message) { return this.request('/api/contact', { method: 'POST', body: JSON.stringify({ name, email, subject, message }) }); },
+  async getShippingOptions() { return this.request('/api/shipping-options'); },
+  async createCheckoutSession(shippingMethod) { return this.request('/api/create-checkout-session', { method: 'POST', body: JSON.stringify({ shipping_method: shippingMethod }) }); },
+  async createOrder(shippingMethod) { return this.request('/api/create-order', { method: 'POST', body: JSON.stringify({ shipping_method: shippingMethod }) }); }
 };
 
 // ─── Auth ───────────────────────────────────────────────
@@ -354,7 +361,7 @@ async function loadCartPage() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('success') === 'true') {
     try {
-      await api.createOrder();
+      await api.createOrder(selectedShipping);
       showToast('Payment successful! Order placed.');
     } catch (e) {}
     window.history.replaceState({}, '', 'cart.html');
@@ -401,13 +408,19 @@ async function loadCartPage() {
   } catch (err) { console.error(err); }
 }
 
+function getShippingCost() {
+  const opt = shippingOptions.find(o => o.id === selectedShipping);
+  return opt ? opt.cost : 4.00;
+}
+
 function updateTotals(subtotal, subtotalEl, totalEl) {
   if (!subtotalEl) return;
+  const shipping = getShippingCost();
   const rows = subtotalEl.querySelectorAll('tr');
   if (rows.length >= 3) {
     rows[0].querySelector('td:last-child').textContent = '€' + subtotal.toFixed(2);
-    rows[1].querySelector('td:last-child').textContent = '€' + SHIPPING.toFixed(2);
-    rows[2].querySelector('td:last-child').textContent = '€' + (subtotal + SHIPPING).toFixed(2);
+    rows[1].querySelector('td:last-child').textContent = '€' + shipping.toFixed(2);
+    rows[2].querySelector('td:last-child').textContent = '€' + (subtotal + shipping).toFixed(2);
   }
 }
 
@@ -471,7 +484,7 @@ async function handleCheckout() {
   const user = await checkAuth();
   if (!user) { window.location.href = 'signup.html'; return; }
   try {
-    const d = await api.createCheckoutSession();
+    const d = await api.createCheckoutSession(selectedShipping);
     if (d.url) window.location.href = d.url;
   } catch (err) { alert('Error: ' + err.message); }
 }
@@ -482,13 +495,16 @@ function initNewsletter() {
   forms.forEach(form => {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const input = form.querySelector('input[type="text"], input[type="email"]');
-      const email = input?.value.trim();
+      const emailInput = form.querySelector('input[type="email"], input[type="text"]');
+      const nameInput = form.querySelector('input[name="newsletter-name"]');
+      const email = emailInput?.value.trim();
+      const username = nameInput?.value.trim();
       if (!email) { alert('Please enter your email'); return; }
       try {
-        await api.subscribeNewsletter(email);
+        await api.subscribeNewsletter(email, username);
         alert('Subscribed to newsletter!');
-        input.value = '';
+        if (emailInput) emailInput.value = '';
+        if (nameInput) nameInput.value = '';
       } catch (err) { alert(err.message); }
     });
   });
@@ -521,11 +537,12 @@ async function loadDashboard() {
       else recent.innerHTML = orders.map(o => `<div class="order-card"><div class="order-header"><strong>${o.order_code}</strong> by ${o.username} <span class="order-status ${o.status}">${o.status}</span></div><div class="order-body">€${o.total.toFixed(2)} - ${new Date(o.created_at).toLocaleDateString()}</div></div>`).join('');
     }
 
-    const subs = document.getElementById('stat-subs');
-    if (subs) {
-      const subRes = await fetch('/api/newsletter');
-      const subData = await subRes.text();
-      try { const sd = JSON.parse(subData); /* not a real endpoint for count, skip */ } catch(e) {}
+    const subsEl = document.getElementById('stat-subs');
+    if (subsEl) {
+      try {
+        const subData = await api.getNewsletterSubscribers();
+        subsEl.textContent = (subData.subscribers || []).length;
+      } catch (e) { subsEl.textContent = '0'; }
     }
   } catch (err) { console.error('Dashboard error:', err); }
 }
@@ -584,11 +601,134 @@ async function loadDashboardProducts() {
 
 async function loadDashboardNewsletter() {
   try {
-    const d = await api.getAdminStats();
+    const d = await api.getNewsletterSubscribers();
+    const subs = d.subscribers || [];
     const tbody = document.querySelector('#newsletter-table tbody');
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="2" style="text-align:center;padding:30px">Newsletter emails are collected on the server. Check data.json for the full list.</td></tr>';
+    if (!subs.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:30px">No subscribers yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = subs.map(s => `<tr>
+      <td>${escapeHtml(s.username || '-')}</td>
+      <td>${escapeHtml(s.email)}</td>
+      <td>${new Date(s.subscribed_at).toLocaleString()}</td>
+    </tr>`).join('');
   } catch (err) { console.error(err); }
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ─── Send Newsletter Modal ────────────────────────────
+function createNewsletterModal() {
+  if (document.getElementById('newsletter-modal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'newsletter-modal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:500px">
+      <span class="modal-close" onclick="this.closest('.modal-overlay').style.display='none'">&times;</span>
+      <h2>Send Newsletter</h2>
+      <form id="newsletter-send-form">
+        <div class="form-group"><label>Subject *</label><input type="text" id="newsletter-subject" required placeholder="Email subject"></div>
+        <div class="form-group"><label>Message *</label><textarea id="newsletter-message" rows="8" required placeholder="Write your message..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
+        <button type="submit" class="modal-submit">Send to All Subscribers</button>
+      </form>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+  document.getElementById('newsletter-send-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const subject = document.getElementById('newsletter-subject').value;
+    const message = document.getElementById('newsletter-message').value;
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    try {
+      const res = await api.sendNewsletter(subject, message);
+      alert(`Newsletter sent to ${res.sent} subscribers!`);
+      modal.style.display = 'none';
+      e.target.reset();
+    } catch (err) { alert('Error: ' + err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Send to All Subscribers'; }
+  });
+}
+
+function showNewsletterModal() {
+  createNewsletterModal();
+  document.getElementById('newsletter-modal').style.display = 'flex';
+}
+
+// ─── Chat / Contact Modal ─────────────────────────────
+function createContactModal() {
+  if (document.getElementById('contact-modal')) return;
+  const modal = document.createElement('div');
+  modal.id = 'contact-modal';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:500px">
+      <span class="modal-close" onclick="this.closest('.modal-overlay').style.display='none'">&times;</span>
+      <h2>Contact Me</h2>
+      <p style="color:#666;margin-bottom:20px">Have a problem? Send me a message and I'll get back to you.</p>
+      <form id="contact-form">
+        <div class="form-group"><label>Your Name *</label><input type="text" id="contact-name" required placeholder="Your name"></div>
+        <div class="form-group"><label>Your Email *</label><input type="email" id="contact-email" required placeholder="your@email.com"></div>
+        <div class="form-group"><label>Subject *</label>
+          <select id="contact-subject" required style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px">
+            <option value="">-- Select a problem --</option>
+            <option value="Order Issue">Order Issue</option>
+            <option value="Product Defect / Damage">Product Defect / Damage</option>
+            <option value="Shipping Delay">Shipping Delay</option>
+            <option value="Wrong Item Received">Wrong Item Received</option>
+            <option value="Return / Refund Request">Return / Refund Request</option>
+            <option value="Payment Problem">Payment Problem</option>
+            <option value="Account Issue">Account Issue</option>
+            <option value="Custom Order Request">Custom Order Request</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Message *</label><textarea id="contact-message" rows="6" required placeholder="Describe your problem in detail..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
+        <button type="submit" class="modal-submit">Send Message</button>
+      </form>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+  document.getElementById('contact-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('contact-name').value;
+    const email = document.getElementById('contact-email').value;
+    const subject = document.getElementById('contact-subject').value;
+    const message = document.getElementById('contact-message').value;
+    const btn = e.target.querySelector('button');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    try {
+      await api.sendContactMessage(name, email, subject, message);
+      alert('Message sent! I will get back to you soon.');
+      modal.style.display = 'none';
+      e.target.reset();
+    } catch (err) { alert('Error: ' + err.message); }
+    finally { btn.disabled = false; btn.textContent = 'Send Message'; }
+  });
+}
+
+function showContactModal() {
+  createContactModal();
+  document.getElementById('contact-modal').style.display = 'flex';
+  checkAuth().then(user => {
+    if (user) {
+      if (document.getElementById('contact-name') && !document.getElementById('contact-name').value) {
+        document.getElementById('contact-name').value = user.username || '';
+      }
+      if (document.getElementById('contact-email') && !document.getElementById('contact-email').value) {
+        document.getElementById('contact-email').value = user.email || '';
+      }
+    }
+  });
 }
 
 // ─── Dashboard Tab Switching ──────────────────────────
@@ -687,13 +827,54 @@ function initSignupPage() {
   }
 }
 
-// ─── Admin Panel Button in Nav ───────────────────────
+// ─── Shipping Options in Cart ────────────────────────
+async function loadShippingOptions() {
+  try {
+    const d = await api.getShippingOptions();
+    shippingOptions = d.options || [];
+    if (shippingOptions.length > 0) selectedShipping = shippingOptions[0].id;
+    renderShippingOptions();
+  } catch (err) { console.error('Failed to load shipping:', err); }
+}
+
+function renderShippingOptions() {
+  const container = document.getElementById('shipping-options');
+  if (!container) return;
+  container.innerHTML = shippingOptions.map(o => `
+    <label class="shipping-option" style="display:flex;align-items:center;gap:10px;padding:8px 0;cursor:pointer;border-bottom:1px solid #eee">
+      <input type="radio" name="shipping" value="${o.id}" ${o.id === selectedShipping ? 'checked' : ''} onchange="selectedShipping=this.value;updateCartShipping()">
+      <div>
+        <strong>${o.name}</strong>
+        <span style="color:#666;font-size:13px;margin-left:8px">€${o.cost.toFixed(2)}</span>
+        <span style="color:#999;font-size:12px;margin-left:8px">${o.eta}</span>
+      </div>
+    </label>
+  `).join('');
+}
+
+function updateCartShipping() {
+  const subtotalEl = document.querySelector('#subtotal table');
+  const totalEl = document.querySelector('#subtotal table tr:last-child td:last-child');
+  const subtotal = parseFloat(subtotalEl?.querySelector('tr:first-child td:last-child')?.textContent?.replace('€', '') || '0');
+  updateTotals(subtotal, subtotalEl, totalEl);
+}
+
+// ─── Admin Panel Button & Chat Button in Nav ─────────
 document.addEventListener('DOMContentLoaded', () => {
   const nav = document.getElementById('navbar');
   if (nav) {
+    const authLink = document.getElementById('auth-link');
+    
+    const chatLi = document.createElement('li');
+    chatLi.innerHTML = '<a href="#" id="chat-nav-btn" style="color:#088178;font-weight:600"><i class="fa-regular fa-message"></i> Chat</a>';
+    if (authLink) authLink.parentNode.insertBefore(chatLi, authLink);
+    document.getElementById('chat-nav-btn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      showContactModal();
+    });
+
     const adminLi = document.createElement('li');
     adminLi.innerHTML = '<a href="#" id="admin-panel-btn" style="color:#088178;font-weight:700">Admin</a>';
-    const authLink = document.getElementById('auth-link');
     if (authLink) authLink.parentNode.insertBefore(adminLi, authLink);
     document.getElementById('admin-panel-btn')?.addEventListener('click', (e) => {
       e.preventDefault();
@@ -719,7 +900,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (['index.html', '', '/'].includes(page)) loadProducts();
   if (page === 'shop.html') loadProducts();
-  if (page === 'cart.html') { loadCartPage(); initNewsletter(); }
+  if (page === 'cart.html') { loadCartPage(); initNewsletter(); loadShippingOptions(); }
   if (page === 'sproduct.html') loadSingleProduct();
   if (page === 'signup.html') initSignupPage();
   if (page === 'wishlist.html') loadWishlistPage();

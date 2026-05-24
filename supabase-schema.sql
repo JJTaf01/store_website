@@ -42,12 +42,15 @@ CREATE TABLE orders (
   total DECIMAL(10,2),
   status TEXT DEFAULT 'paid',
   items JSONB,
+  shipping_method TEXT DEFAULT '',
+  shipping_courier TEXT DEFAULT '',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE newsletters (
   id SERIAL PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
+  username TEXT DEFAULT '',
   subscribed_at TIMESTAMPTZ DEFAULT NOW()
 );
 

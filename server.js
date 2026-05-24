@@ -68,7 +68,23 @@ async function sendVerificationEmail(req, user, token) {
   }
 }
 const PORT = process.env.PORT || 3000;
-const SHIPPING_COST = 4.00;
+const SHIPPING_OPTIONS = [
+  { id: 'standard', name: 'Standard Shipping', cost: 4.00, eta: '5-10 business days' },
+  { id: 'boxnow', name: 'Box Now (Locker)', cost: 2.50, eta: '2-4 business days' },
+  { id: 'elta', name: 'ELTA Courier', cost: 3.00, eta: '2-4 business days' },
+  { id: 'acs', name: 'ACS Courier', cost: 3.50, eta: '1-3 business days' },
+  { id: 'courier-center', name: 'Courier Center', cost: 4.00, eta: '1-3 business days' },
+  { id: 'speedex', name: 'Speedex', cost: 3.50, eta: '1-3 business days' },
+  { id: 'geniki', name: 'Geniki Taxydromiki', cost: 3.50, eta: '1-3 business days' },
+];
+function getShippingCost(id) {
+  const opt = SHIPPING_OPTIONS.find(o => o.id === id);
+  return opt ? opt.cost : 4.00;
+}
+function getShippingName(id) {
+  const opt = SHIPPING_OPTIONS.find(o => o.id === id);
+  return opt ? opt.name : 'Shipping';
+}
 
 if (process.env.RENDER_EXTERNAL_URL || process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
@@ -471,6 +487,10 @@ app.delete('/api/wishlist/:productId', requireAuth, async (req, res) => {
 // ─── Orders & Stripe ───────────────────────────────────────
 app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
   try {
+    const { shipping_method } = req.body || {};
+    const shippingCost = getShippingCost(shipping_method);
+    const shippingName = getShippingName(shipping_method);
+
     const { data: cartItems } = await supabase
       .from('cart_items')
       .select('*, products(*)')
@@ -488,7 +508,7 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
     }).filter(Boolean);
 
     lineItems.push({
-      price_data: { currency: 'eur', product_data: { name: 'Shipping' }, unit_amount: Math.round(SHIPPING_COST * 100) },
+      price_data: { currency: 'eur', product_data: { name: shippingName }, unit_amount: Math.round(shippingCost * 100) },
       quantity: 1,
     });
 
@@ -507,6 +527,10 @@ app.post('/api/create-checkout-session', requireAuth, async (req, res) => {
 
 app.post('/api/create-order', requireAuth, async (req, res) => {
   try {
+    const { shipping_method } = req.body || {};
+    const shippingCost = getShippingCost(shipping_method);
+    const shippingName = getShippingName(shipping_method);
+
     const { data: cartItems } = await supabase
       .from('cart_items')
       .select('*, products(*)')
@@ -530,7 +554,8 @@ app.post('/api/create-order', requireAuth, async (req, res) => {
     const { data: order, error } = await supabase.from('orders').insert({
       user_id: req.session.userId, username: user?.username || 'Unknown',
       order_code: orderCode, subtotal: Math.round(subtotal * 100) / 100,
-      shipping: SHIPPING_COST, total: Math.round((subtotal + SHIPPING_COST) * 100) / 100,
+      shipping: shippingCost, total: Math.round((subtotal + shippingCost) * 100) / 100,
+      shipping_method: shipping_method || 'standard', shipping_courier: shippingName,
       status: 'paid', items
     }).select().single();
 
@@ -575,6 +600,7 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
     const { data: allOrders } = await supabase.from('orders').select('*');
     const { data: users } = await supabase.from('users').select('id');
     const { data: products } = await supabase.from('products').select('id');
+    const { data: subscribers } = await supabase.from('newsletters').select('id', { count: 'exact', head: true });
 
     const monthlyRevenue = {};
     for (let m = 0; m < 12; m++) {
@@ -607,6 +633,7 @@ app.get('/api/admin/stats', requireAdmin, async (req, res) => {
       stats: {
         totalRevenue: Math.round(totalRevenue * 100) / 100,
         totalOrders, totalProducts, monthlyRevenue,
+        totalSubscribers: (subscribers || []).length,
       },
       orders: recentOrdersWithUser,
     });
@@ -632,21 +659,110 @@ app.get('/api/admin/orders', requireAdmin, async (req, res) => {
 // ─── Newsletter ────────────────────────────────────────────
 app.post('/api/newsletter', async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, username } = req.body;
     if (!email) return res.status(400).json({ error: 'Email required' });
 
     const { data: existing } = await supabase.from('newsletters').select('*').eq('email', email).maybeSingle();
     if (existing) return res.json({ success: true, message: 'Already subscribed' });
 
-    const { error } = await supabase.from('newsletters').insert({ email });
+    const insertData = { email };
+    if (username) insertData.username = username;
+    if (req.session?.userId) {
+      const { data: user } = await supabase.from('users').select('username').eq('id', req.session.userId).maybeSingle();
+      if (user) insertData.username = user.username;
+    }
+
+    const { error } = await supabase.from('newsletters').insert(insertData);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.get('/api/newsletter', requireAdmin, async (req, res) => {
+  try {
+    const { data: subscribers, error } = await supabase
+      .from('newsletters')
+      .select('*')
+      .order('subscribed_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ subscribers: subscribers || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Admin send newsletter email ────────────────────────────
+app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
+  try {
+    if (!transporter) return res.status(400).json({ error: 'Email not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env' });
+
+    const { subject, message } = req.body;
+    if (!subject || !message) return res.status(400).json({ error: 'Subject and message required' });
+
+    const { data: subscribers } = await supabase.from('newsletters').select('email');
+    if (!subscribers || subscribers.length === 0) return res.status(400).json({ error: 'No subscribers' });
+
+    const emails = subscribers.map(s => s.email);
+    const batchSize = 50;
+    let sent = 0;
+    for (let i = 0; i < emails.length; i += batchSize) {
+      const batch = emails.slice(i, i + batchSize);
+      try {
+        await transporter.sendMail({
+          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          bcc: batch,
+          subject: subject,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+            <h2 style="color:#088178;">${subject}</h2>
+            <p>${message.replace(/\n/g, '<br>')}</p>
+            <hr><p style="color:#888;font-size:12px;">You are receiving this because you subscribed to JJ's 3D Shop newsletter. <a href="${process.env.APP_URL || 'https://jj3dshop.cc'}">Unsubscribe</a></p>
+          </div>`
+        });
+        sent += batch.length;
+      } catch (err) {
+        console.error('Batch send error:', err.message);
+      }
+    }
+
+    res.json({ success: true, sent });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Contact form ───────────────────────────────────────────
+app.post('/api/contact', async (req, res) => {
+  try {
+    const { name, email, subject, message } = req.body;
+    if (!name || !email || !message) return res.status(400).json({ error: 'Name, email, and message required' });
+
+    if (!transporter) return res.status(400).json({ error: 'Email not configured on this server' });
+
+    const adminEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+    await transporter.sendMail({
+      from: `"${name}" <${email}>`,
+      replyTo: email,
+      to: adminEmail,
+      subject: `Contact Form: ${subject || 'General Inquiry'} - from ${name}`,
+      html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+        <h2>New Contact Form Submission</h2>
+        <p><strong>Name:</strong> ${name}</p>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Subject:</strong> ${subject || 'General Inquiry'}</p>
+        <p><strong>Message:</strong></p>
+        <p>${message.replace(/\n/g, '<br>')}</p>
+      </div>`
+    });
+
+    res.json({ success: true, message: 'Message sent successfully!' });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Shipping Options ───────────────────────────────────────
+app.get('/api/shipping-options', (req, res) => {
+  res.json({ options: SHIPPING_OPTIONS });
+});
+
 // ─── Start ─────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`JJ's 3D Shop running on http://localhost:${PORT}`);
-  console.log(`Shipping: €${SHIPPING_COST.toFixed(2)}`);
+  console.log(`Shipping: ${SHIPPING_OPTIONS.length} options available`);
   console.log('Stripe ready (set STRIPE_SECRET_KEY in .env)');
 });
