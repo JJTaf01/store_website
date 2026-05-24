@@ -714,6 +714,7 @@ app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
         sent += batch.length;
       } catch (err) {
         console.error('Batch send error:', err.message);
+        return res.status(500).json({ error: 'Email send failed: ' + err.message, sent });
       }
     }
 
@@ -797,12 +798,22 @@ app.post('/api/admin/clear-users', requireAdmin, async (req, res) => {
 });
 
 // ─── Debug endpoint ────────────────────────────────────────
-app.get('/api/debug', (req, res) => {
+app.get('/api/debug', async (req, res) => {
+  let smtpVerify = null;
+  if (transporter) {
+    try {
+      await transporter.verify();
+      smtpVerify = 'ok';
+    } catch (err) {
+      smtpVerify = err.message;
+    }
+  }
   res.json({
     smtp: !!transporter,
-    smtp_host: !!process.env.SMTP_HOST,
-    smtp_user: !!process.env.SMTP_USER,
-    smtp_pass: !!process.env.SMTP_PASS,
+    smtp_verify: smtpVerify,
+    smtp_host: process.env.SMTP_HOST,
+    smtp_user: process.env.SMTP_USER,
+    smtp_from: process.env.SMTP_FROM,
     session: req.session ? { userId: req.session.userId, isAdmin: req.session.isAdmin } : null,
   });
 });
