@@ -78,7 +78,7 @@ async function sendEmail(to, subject, htmlContent) {
       await transporter.sendMail({ from: `"JJ's 3D Shop" <${fromEmail}>`, to, subject, html: htmlContent });
       return;
     } catch (err) {
-      console.log('SMTP failed, trying Brevo API:', err.message);
+      console.log('SMTP failed (code=' + (err.code || '?') + ', status=' + (err.statusCode || '?') + ')', err.message);
     }
   }
   if (!process.env.BREVO_API_KEY && !process.env.SMTP_PASS) {
