@@ -55,6 +55,7 @@ const api = {
   async subscribeNewsletter(email, username) { return this.request('/api/newsletter', { method: 'POST', body: JSON.stringify({ email, username }) }); },
   async getNewsletterSubscribers() { return this.request('/api/newsletter'); },
   async sendNewsletter(subject, message) { return this.request('/api/admin/send-newsletter', { method: 'POST', body: JSON.stringify({ subject, message }) }); },
+  async testEmail() { return this.request('/api/admin/test-email', { method: 'POST' }); },
   async getContactMessages() { return this.request('/api/admin/contact-messages'); },
   async sendContactMessage(name, email, subject, message) { return this.request('/api/contact', { method: 'POST', body: JSON.stringify({ name, email, subject, message }) }); },
   async getShippingOptions() { return this.request('/api/shipping-options'); },
@@ -639,25 +640,55 @@ function createNewsletterModal() {
     <div class="modal-content" style="max-width:500px">
       <span class="modal-close" onclick="this.closest('.modal-overlay').style.display='none'">&times;</span>
       <h2>Send Newsletter</h2>
+      <button class="normal" id="test-email-btn" style="margin-bottom:15px;padding:6px 14px;font-size:13px">Send Test Email to Myself</button>
       <div class="form-group"><label for="newsletter-subject">Subject *</label><input type="text" id="newsletter-subject" placeholder="Email subject"></div>
       <div class="form-group"><label for="newsletter-message">Message *</label><textarea id="newsletter-message" rows="8" placeholder="Write your message..." style="width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;font-family:inherit"></textarea></div>
       <button class="modal-submit" id="newsletter-send-btn">Send to All Subscribers</button>
+      <div id="newsletter-result" style="margin-top:10px;font-size:14px;color:#088178"></div>
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+
+  document.getElementById('test-email-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('test-email-btn');
+    const result = document.getElementById('newsletter-result');
+    btn.disabled = true;
+    btn.textContent = 'Sending test...';
+    result.textContent = '';
+    try {
+      const res = await api.testEmail();
+      result.style.color = '#088178';
+      result.textContent = res.message;
+    } catch (err) {
+      result.style.color = '#e74c3c';
+      result.textContent = err.message;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Send Test Email to Myself';
+  });
+
   document.getElementById('newsletter-send-btn').addEventListener('click', async () => {
     const subject = document.getElementById('newsletter-subject').value;
     const message = document.getElementById('newsletter-message').value;
-    if (!subject || !message) { alert('Subject and message required'); return; }
+    const result = document.getElementById('newsletter-result');
+    if (!subject || !message) { result.style.color = '#e74c3c'; result.textContent = 'Subject and message required'; return; }
     const btn = document.getElementById('newsletter-send-btn');
     btn.disabled = true;
     btn.textContent = 'Sending...';
+    result.textContent = '';
     try {
       const res = await api.sendNewsletter(subject, message);
-      alert('Newsletter sent to ' + res.sent + ' subscribers!');
-      modal.style.display = 'none';
-    } catch (err) { alert('Error: ' + err.message); }
-    finally { btn.disabled = false; btn.textContent = 'Send to All Subscribers'; }
+      result.style.color = '#088178';
+      result.textContent = 'Sent to ' + res.sent + ' of ' + res.total + ' subscribers!';
+      if (res.sent === res.total) {
+        setTimeout(() => modal.style.display = 'none', 2000);
+      }
+    } catch (err) {
+      result.style.color = '#e74c3c';
+      result.textContent = err.message;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Send to All Subscribers';
   });
 }
 

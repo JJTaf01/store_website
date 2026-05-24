@@ -686,44 +686,62 @@ app.get('/api/newsletter', requireAdmin, async (req, res) => {
 // ─── Admin send newsletter email ────────────────────────────
 app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
   try {
-    if (!transporter) return res.status(400).json({ error: 'Email not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env' });
-
     const { subject, message } = req.body;
     if (!subject || !message) return res.status(400).json({ error: 'Subject and message required' });
+    if (!transporter) return res.status(400).json({ error: 'Email not configured. Add SMTP env vars in Render dashboard.' });
 
     const { data: subscribers } = await supabase.from('newsletters').select('email');
     if (!subscribers || subscribers.length === 0) return res.status(400).json({ error: 'No subscribers' });
 
+    const fromName = "JJ's 3D Shop";
     const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-    console.log('Sending newsletter from:', fromEmail, 'to', subscribers.length, 'subscribers');
 
     const emails = subscribers.map(s => s.email);
-    const batchSize = 50;
     let sent = 0;
-    for (let i = 0; i < emails.length; i += batchSize) {
-      const batch = emails.slice(i, i + batchSize);
+    let lastErr = null;
+
+    for (const email of emails) {
       try {
-        const info = await transporter.sendMail({
-          from: `"JJ's 3D Shop" <${fromEmail}>`,
-          to: fromEmail,
-          bcc: batch,
+        await transporter.sendMail({
+          from: `"${fromName}" <${fromEmail}>`,
+          to: email,
           subject: subject,
           html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
             <h2 style="color:#088178;">${subject}</h2>
             <p>${message.replace(/\n/g, '<br>')}</p>
-            <hr><p style="color:#888;font-size:12px;">You are receiving this because you subscribed to JJ's 3D Shop newsletter.</p>
+            <hr><p style="color:#888;font-size:12px;">You're receiving this because you subscribed to JJ's 3D Shop.</p>
           </div>`
         });
-        console.log('Batch sent:', info.messageId);
-        sent += batch.length;
+        sent++;
       } catch (err) {
-        console.error('Batch send error:', err.message, err.code);
-        return res.status(500).json({ error: 'Email send failed: ' + err.message + ' (code: ' + (err.code || 'none') + ')', sent });
+        lastErr = err.message + ' (code: ' + (err.code || 'none') + ')';
+        console.error('Send failed to', email, ':', lastErr);
       }
     }
 
-    res.json({ success: true, sent });
+    if (sent === 0 && lastErr) {
+      return res.status(500).json({ error: 'Failed to send any emails. Last error: ' + lastErr, sent: 0 });
+    }
+
+    res.json({ success: true, sent: sent, total: emails.length });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Admin test email ──────────────────────────────────────
+app.post('/api/admin/test-email', requireAdmin, async (req, res) => {
+  try {
+    if (!transporter) return res.status(400).json({ error: 'Email not configured.' });
+    const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+    await transporter.sendMail({
+      from: `"JJ's 3D Shop" <${fromEmail}>`,
+      to: fromEmail,
+      subject: 'Test email from JJ\'s 3D Shop',
+      html: '<p>If you see this, email sending works!</p>'
+    });
+    res.json({ success: true, message: 'Test email sent to ' + fromEmail });
+  } catch (err) {
+    res.status(500).json({ error: 'Test email failed: ' + err.message + ' (code: ' + (err.code || 'none') + ')' });
+  }
 });
 
 // ─── Contact form ───────────────────────────────────────────
