@@ -15,13 +15,15 @@ const app = express();
 
 let transporter = null;
 if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+  const smtpPort = parseInt(process.env.SMTP_PORT) || 587;
   transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === 'true',
-    connectionTimeout: 8000,
-    greetingTimeout: 8000,
-    socketTimeout: 10000,
+    port: smtpPort,
+    secure: smtpPort === 465 || process.env.SMTP_SECURE === 'true',
+    requireTLS: smtpPort !== 465,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 12000,
     auth: {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
