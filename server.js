@@ -106,6 +106,9 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
   res.json({ received: true });
 });
 
+// ─── Favicon ───────────────────────────────────────────────
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
 // ─── Middleware ─────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
