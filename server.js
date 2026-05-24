@@ -31,8 +31,8 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
 
 function sendEmailViaBrevo(to, subject, htmlContent) {
   return new Promise((resolve, reject) => {
-    const apiKey = process.env.SMTP_PASS;
-    if (!apiKey) return reject(new Error('No SMTP password/key configured'));
+    const apiKey = process.env.BREVO_API_KEY || process.env.SMTP_PASS;
+    if (!apiKey) return reject(new Error('No Brevo API key configured (set BREVO_API_KEY or SMTP_PASS)'));
 
     const fromEmail = process.env.SMTP_FROM || 'jj3dprintshop@gmail.com';
     const data = JSON.stringify({
@@ -78,6 +78,9 @@ async function sendEmail(to, subject, htmlContent) {
     } catch (err) {
       console.log('SMTP failed, trying Brevo API:', err.message);
     }
+  }
+  if (!process.env.BREVO_API_KEY && !process.env.SMTP_PASS) {
+    throw new Error('No email sending method configured. Set BREVO_API_KEY in Render env vars.');
   }
   await sendEmailViaBrevo(to, subject, htmlContent);
 }
@@ -863,6 +866,7 @@ app.get('/api/debug', (req, res) => {
     smtp_secure: process.env.SMTP_SECURE || '(not set)',
     smtp_user: process.env.SMTP_USER ? '✓ set' : '(not set)',
     smtp_from: process.env.SMTP_FROM || '(not set)',
+    brevo_api_key: process.env.BREVO_API_KEY ? '✓ set' : '(not set, fallback to SMTP_PASS)',
     session: req.session ? { userId: req.session.userId, isAdmin: req.session.isAdmin } : null,
   });
 });
