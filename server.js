@@ -23,6 +23,12 @@ if (process.env.SMTP_HOST) {
       pass: process.env.SMTP_PASS,
     },
   });
+  transporter.verify().then(() => {
+    console.log('SMTP connected successfully');
+  }).catch(err => {
+    console.error('SMTP connection failed:', err.message);
+    transporter = null;
+  });
 }
 
 function getAppUrl(req) {
@@ -723,7 +729,8 @@ app.post('/api/admin/send-newsletter', requireAdmin, async (req, res) => {
       const batch = emails.slice(i, i + batchSize);
       try {
         await transporter.sendMail({
-          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          from: `"JJ's 3D Shop" <${process.env.SMTP_USER}>`,
+          to: process.env.SMTP_FROM || process.env.SMTP_USER,
           bcc: batch,
           subject: subject,
           html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -752,7 +759,7 @@ app.post('/api/contact', async (req, res) => {
 
     const adminEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
     await transporter.sendMail({
-      from: `"${name}" <${email}>`,
+      from: `"JJ's 3D Shop" <${process.env.SMTP_USER}>`,
       replyTo: email,
       to: adminEmail,
       subject: `Contact Form: ${subject || 'General Inquiry'} - from ${name}`,
