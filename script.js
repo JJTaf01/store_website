@@ -217,7 +217,10 @@ function renderProductCard(product) {
   const stars = '<i class="fas fa-star"></i>'.repeat(5);
   const admin = isAdminMode();
   return `<div class="pro" data-id="${product.id}">
-    <img src="${imgSrc}" alt="${product.name}" onclick="window.location.href='sproduct.html?id=${product.id}'" style="cursor:pointer">
+    <div class="img-container" style="position:relative">
+      <img src="${imgSrc}" alt="${product.name}" onclick="window.location.href='sproduct.html?id=${product.id}'" style="cursor:pointer">
+      <a href="#" class="wish-link" data-id="${product.id}" title="Add to wishlist"><i class="fa-regular fa-heart"></i></a>
+    </div>
     <div class="des">
       <span>${product.category || 'Figure'}</span>
       <h5 onclick="window.location.href='sproduct.html?id=${product.id}'" style="cursor:pointer">${product.name}</h5>
@@ -225,7 +228,6 @@ function renderProductCard(product) {
       <h4>€${parseFloat(product.price).toFixed(2)}</h4>
     </div>
     <a href="#" class="cart-link" data-id="${product.id}"><i class="fa-solid fa-cart-plus cart"></i></a>
-    <a href="#" class="wish-link" data-id="${product.id}" title="Add to wishlist"><i class="fa-regular fa-heart" style="position:absolute;top:10px;right:10px;font-size:20px;color:#e74c3c;z-index:5"></i></a>
     ${admin ? `<button class="edit-btn" data-id="${product.id}"><i class="fa-solid fa-pen"></i></button>` : ''}
     ${admin ? `<button class="delete-btn" data-id="${product.id}"><i class="fa-solid fa-trash"></i></button>` : ''}
   </div>`;
@@ -420,7 +422,12 @@ async function loadWishlistPage() {
     const items = d.items || [];
     if (!items.length) { container.innerHTML = '<p style="text-align:center;width:100%;padding:40px">Your wishlist is empty.</p>'; return; }
     container.innerHTML = items.map(p => `<div class="pro">
-      <img src="${p.image || 'img/button.png'}" alt="${p.name}" onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">
+      <div class="img-container" style="position:relative">
+        <img src="${p.image || 'img/button.png'}" alt="${p.name}" onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">
+        <button class="wish-link wish-remove-btn" data-wishid="${p.product_id}" title="Remove from wishlist" style="opacity:1;background:#e74c3c;border-color:#e74c3c">
+          <i class="fa-solid fa-heart" style="color:white"></i>
+        </button>
+      </div>
       <div class="des">
         <span>Wishlist</span>
         <h5 onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">${p.name}</h5>
@@ -428,7 +435,6 @@ async function loadWishlistPage() {
         <h4>€${parseFloat(p.price).toFixed(2)}</h4>
       </div>
       <a href="#" class="cart-link" data-id="${p.product_id}"><i class="fa-solid fa-cart-plus cart"></i></a>
-      <button class="delete-btn" style="opacity:1" data-wishid="${p.product_id}" title="Remove from wishlist"><i class="fa-solid fa-trash"></i></button>
     </div>`).join('');
     container.querySelectorAll('[data-wishid]').forEach(btn => {
       btn.addEventListener('click', async (e) => {
