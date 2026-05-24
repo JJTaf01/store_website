@@ -5,6 +5,11 @@ CREATE TABLE users (
   email TEXT UNIQUE NOT NULL,
   password TEXT NOT NULL,
   is_admin INTEGER DEFAULT 0,
+  email_verified BOOLEAN DEFAULT FALSE,
+  verification_token TEXT,
+  verification_expires TIMESTAMPTZ,
+  reset_token TEXT,
+  reset_expires TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

@@ -6,11 +6,73 @@ const multer = require('multer');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const supabase = require('./supabase');
 
 const app = express();
+
+let transporter = null;
+if (process.env.SMTP_HOST) {
+  transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+}
+
+function getAppUrl(req) {
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
+  if (process.env.APP_URL) return process.env.APP_URL;
+  const proto = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+  return `${proto}://${req.headers.host}`;
+}
+
+async function sendVerificationEmail(req, user, token) {
+  if (!transporter) {
+    console.log('Email verification skipped: No SMTP configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env');
+    return;
+  }
+  const baseUrl = getAppUrl(req);
+  const verifyUrl = `${baseUrl}/verify-email?token=${token}`;
+  
+  const mailOptions = {
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: user.email,
+    subject: 'Verify your email - JJ\'s 3D Shop',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>Welcome to JJ's 3D Shop!</h2>
+        <p>Hi ${user.username},</p>
+        <p>Thank you for registering. Please verify your email by clicking the button below:</p>
+        <div style="margin: 30px 0; text-align: center;">
+          <a href="${verifyUrl}" style="background: #088178; color: white; padding: 15px 30px; text-decoration: none; border-radius: 6px; font-weight: bold;">
+            Verify Email Address
+          </a>
+        </div>
+        <p>Or copy and paste this link: <br><small style="color: #666; word-break: break-all;">${verifyUrl}</small></p>
+        <p style="color: #888; font-size: 12px; margin-top: 30px;">This link expires in 24 hours.</p>
+      </div>
+    `,
+  };
+  
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('Verification email sent to:', user.email);
+  } catch (err) {
+    console.error('Failed to send verification email:', err.message);
+  }
+}
 const PORT = process.env.PORT || 3000;
 const SHIPPING_COST = 4.00;
+
+if (process.env.RENDER_EXTERNAL_URL || process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 
 // ─── Webhook (must be before json parser to get raw body) ──
 app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -31,11 +93,17 @@ app.post('/api/stripe-webhook', express.raw({ type: 'application/json' }), async
 // ─── Middleware ─────────────────────────────────────────────
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+const isProd = process.env.NODE_ENV === 'production' || process.env.RENDER_EXTERNAL_URL;
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'fallback-secret',
+  secret: process.env.SESSION_SECRET || 'fallback-secret-change-me',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 30 * 24 * 60 * 60 * 1000 }
+  cookie: {
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    httpOnly: true
+  }
 }));
 app.use(express.static(path.join(__dirname)));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -65,22 +133,95 @@ app.post('/api/auth/signup', async (req, res) => {
     const { username, email, password } = req.body;
     if (!username || !email || !password) return res.status(400).json({ error: 'All fields required' });
 
-    const { data: existing } = await supabase.from('users').select('id').eq('email', email).maybeSingle();
+    const normEmail = email.toLowerCase().trim();
+    const { data: existing } = await supabase.from('users').select('id').ilike('email', normEmail).maybeSingle();
     if (existing) return res.status(400).json({ error: 'Email already registered' });
 
     const { count } = await supabase.from('users').select('*', { count: 'exact', head: true });
     const isAdmin = count === 0 ? 1 : 0;
 
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const { data: user, error } = await supabase.from('users').insert({
-      username, email, password: hashedPassword, is_admin: isAdmin
+      username, 
+      email: normEmail, 
+      password: hashedPassword, 
+      is_admin: isAdmin,
+      email_verified: !transporter,
+      verification_token: transporter ? verificationToken : null,
+      verification_expires: transporter ? verificationExpires : null
     }).select().single();
 
     if (error) return res.status(500).json({ error: error.message });
 
+    if (transporter) {
+      await sendVerificationEmail(req, { id: user.id, username, email: normEmail }, verificationToken);
+    }
+
     req.session.userId = user.id;
     req.session.isAdmin = isAdmin;
-    res.json({ user: { id: user.id, username, email, is_admin: isAdmin } });
+    res.json({ 
+      user: { id: user.id, username, email: normEmail, is_admin: isAdmin },
+      needsVerification: !!transporter
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.send('<html><body><h3>Invalid verification link</h3><p><a href="/signup.html">Go to login</a></p></body></html>');
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('verification_token', token)
+      .maybeSingle();
+
+    if (!user) return res.send('<html><body><h3>Invalid or expired verification link</h3><p><a href="/signup.html">Go to login</a></p></body></html>');
+
+    if (user.verification_expires && new Date(user.verification_expires) < new Date()) {
+      return res.send('<html><body><h3>Verification link expired</h3><p><a href="/signup.html">Login and request a new one</a></p></body></html>');
+    }
+
+    await supabase
+      .from('users')
+      .update({ email_verified: true, verification_token: null, verification_expires: null })
+      .eq('id', user.id);
+
+    res.send(`<html><body style="font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 80vh;">
+      <div style="text-align: center; padding: 40px; background: #e8f5f4; border-radius: 12px;">
+        <h2 style="color: #088178;">Email Verified!</h2>
+        <p>Thank you, ${user.username}. Your email has been verified.</p>
+        <p><a href="/shop.html" style="color: #088178; font-weight: bold;">Start Shopping</a></p>
+      </div>
+    </body></html>`);
+  } catch (err) { 
+    console.error('Verify error:', err);
+    res.status(500).send('<html><body><h3>Server error during verification</h3><p><a href="/signup.html">Go to login</a></p></body></html>');
+  }
+});
+
+app.post('/api/auth/resend-verification', requireAuth, async (req, res) => {
+  try {
+    if (!transporter) return res.status(400).json({ error: 'Email not configured on this server' });
+    
+    const { data: user } = await supabase.from('users').select('*').eq('id', req.session.userId).maybeSingle();
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    if (user.email_verified) return res.json({ message: 'Email already verified' });
+
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await supabase
+      .from('users')
+      .update({ verification_token: verificationToken, verification_expires: verificationExpires })
+      .eq('id', user.id);
+
+    await sendVerificationEmail(req, user, verificationToken);
+    res.json({ success: true, message: 'Verification email sent' });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -89,11 +230,20 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'All fields required' });
 
-    const { data: user } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
+    const normEmail = email.toLowerCase().trim();
+    const { data: user } = await supabase.from('users').select('*').ilike('email', normEmail).maybeSingle();
     if (!user) return res.status(400).json({ error: 'Invalid email or password' });
 
     const valid = await bcrypt.compare(password, user.password);
     if (!valid) return res.status(400).json({ error: 'Invalid email or password' });
+
+    if (transporter && !user.email_verified) {
+      return res.status(403).json({ 
+        error: 'Email not verified', 
+        needsVerification: true,
+        message: 'Please verify your email first. Check your inbox or resend verification.'
+      });
+    }
 
     req.session.userId = user.id;
     req.session.isAdmin = user.is_admin;
@@ -106,7 +256,7 @@ app.post('/api/auth/logout', (req, res) => { req.session.destroy(); res.json({ s
 app.get('/api/auth/me', async (req, res) => {
   if (!req.session.userId) return res.json({ user: null });
   const { data: user } = await supabase.from('users').select('*').eq('id', req.session.userId).maybeSingle();
-  res.json({ user: user ? { id: user.id, username: user.username, email: user.email, is_admin: user.is_admin } : null });
+  res.json({ user: user ? { id: user.id, username: user.username, email: user.email, is_admin: user.is_admin, email_verified: user.email_verified } : null });
 });
 
 // ─── Products ──────────────────────────────────────────────

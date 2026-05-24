@@ -424,8 +424,8 @@ async function loadWishlistPage() {
     container.innerHTML = items.map(p => `<div class="pro">
       <div class="img-container" style="position:relative">
         <img src="${p.image || 'img/button.png'}" alt="${p.name}" onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">
-        <button class="wish-link wish-remove-btn" data-wishid="${p.product_id}" title="Remove from wishlist" style="opacity:1;background:#e74c3c;border-color:#e74c3c">
-          <i class="fa-solid fa-heart" style="color:white"></i>
+        <button class="wishlist-remove-btn" data-wishid="${p.product_id}" title="Remove from wishlist" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:50px;height:50px;background:#e74c3c;border:2px solid #e74c3c;border-radius:50%;opacity:1;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:10">
+          <i class="fa-solid fa-trash" style="color:white;font-size:20px;pointer-events:none"></i>
         </button>
       </div>
       <div class="des">
@@ -640,8 +640,30 @@ function initSignupPage() {
       const email = document.getElementById('login-email')?.value;
       const password = document.getElementById('login-password')?.value;
       if (!email || !password) { alert('Please fill in all fields'); return; }
-      try { await api.login(email, password); window.location.href = 'index.html'; }
-      catch (err) { alert(err.message); }
+      try { 
+        await api.login(email, password); 
+        window.location.href = 'index.html'; 
+      } catch (err) { 
+        if (err.message && err.message.includes('Email not verified')) {
+          const resend = confirm('Your email is not verified. Would you like us to resend the verification email?');
+          if (resend) {
+            try {
+              await api.login(email, password).catch(() => {});
+              const res = await fetch('/api/auth/resend-verification', { 
+                method: 'POST', 
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' }
+              });
+              if (res.ok) alert('Verification email sent! Check your inbox (and spam folder).');
+              else alert('Could not resend. Please try again later.');
+            } catch {
+              alert('Could not resend. Please try signing up again or contact support.');
+            }
+          }
+        } else {
+          alert(err.message); 
+        }
+      }
     });
   }
   if (registerForm) {
@@ -654,8 +676,11 @@ function initSignupPage() {
       const code = document.getElementById('reg-admin-code')?.value;
       if (password !== confirm) { alert('Passwords do not match'); return; }
       try {
-        await api.register(username, email, password);
+        const result = await api.register(username, email, password);
         if (code === ADMIN_CODE) setAdminMode(true);
+        if (result && result.needsVerification) {
+          alert('Account created! Please check your email (and spam folder) to verify your email address.');
+        }
         window.location.href = 'index.html';
       } catch (err) { alert(err.message); }
     });

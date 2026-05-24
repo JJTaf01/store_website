@@ -275,22 +275,22 @@ body {
 
 #product1 .pro .des h4 {
     padding-top: 7px;
-    font-size: 17;
+    font-size: 17px;
     font-weight: 700;
     color: #088178;
 }
 
+/* Old cart class - now icon inside cart-link wrapper */
 #product1 .pro .cart{
-    width: 40px;
-    height: 40px;
-    line-height: 40px;
-    border-radius: 50px;
-    background-color: #fae7d0;
-    color: #088178;
-    border: 1px solid #cce7d0;
-    position: absolute;
-    bottom: 20px;
-    right: 10px;
+    pointer-events: none;
+    margin: 0;
+    line-height: 1;
+    width: auto;
+    height: auto;
+    position: static;
+    background: none;
+    border: none;
+    color: inherit;
 }
 
 #banner {
@@ -1282,16 +1282,11 @@ body {
   color: #088178;
 }
 #product1.single-bottom .pro .cart {
-  width: 40px;
-  height: 40px;
-  line-height: 40px;
-  border-radius: 50px;
-  background-color: #fae7d0;
-  color: #088178;
-  border: 1px solid #cce7d0;
-  position: absolute;
-  bottom: 20px;
-  right: 10px;
+  pointer-events: none;
+  position: static;
+  background: none;
+  border: none;
+  color: inherit;
 }
 
 /* ============ Edit Button ============ */
