@@ -161,14 +161,14 @@ function showEditModal(product) {
     if (removeCheckbox) {
       removeCheckbox.checked = false;
       removeCheckbox.style.display = 'inline-block';
-      removeCheckbox.nextElementSibling.style.display = 'inline';
+      document.getElementById('remove-image-label').style.display = 'inline-block';
     }
   } else {
     preview.style.display = 'none';
     if (removeCheckbox) {
       removeCheckbox.checked = false;
       removeCheckbox.style.display = 'none';
-      removeCheckbox.nextElementSibling.style.display = 'none';
+      document.getElementById('remove-image-label').style.display = 'none';
     }
   }
 
@@ -187,7 +187,7 @@ function showAdminModal() {
   document.getElementById('image-preview').style.display = 'none';
   document.getElementById('remove-image').checked = false;
   document.getElementById('remove-image').style.display = 'none';
-  document.getElementById('remove-image').nextElementSibling.style.display = 'none';
+  document.getElementById('remove-image-label').style.display = 'none';
   modal.style.display = 'flex';
 }
 
@@ -209,7 +209,7 @@ function createAdminModal() {
         <div class="form-group"><label>Category</label><select name="category"><option>Figure</option><option>Cosplay</option><option>Stand</option><option>Other</option></select></div>
         <div class="form-group"><label>Image</label><input type="file" name="image" accept="image/*">
           <div id="image-preview" style="display:none;margin-top:8px"></div>
-          <label style="display:none;margin-top:8px;font-size:13px;color:#e74c3c;cursor:pointer">
+          <label id="remove-image-label" style="display:none;margin-top:8px;font-size:13px;color:#e74c3c;cursor:pointer">
             <input type="checkbox" name="remove_image" id="remove-image" value="true"> Remove current image
           </label>
         </div>
