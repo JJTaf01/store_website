@@ -88,3 +88,10 @@ INSERT INTO products (name, description, price, stock, category, image) VALUES
 ('Toji Fushiguro', 'Toji Fushiguro figure from Jujutsu Kaisen.', 49.99, 4, 'Figure', '/img/products/n6.jpg'),
 ('Luffy Gear 5', 'Monkey D. Luffy Gear 5 figure from One Piece.', 39.99, 6, 'Figure', '/img/products/f6.jpg'),
 ('Avatar Fire & Ash', 'Figure inspired by Avatar Fire and Ash.', 19.99, 7, 'Figure', '/img/products/n8.jpg');
+
+-- ─── Create Storage bucket for product images ─────────
+INSERT INTO storage.buckets (id, name, public) VALUES ('product-images', 'product-images', true)
+ON CONFLICT (id) DO NOTHING;
+
+-- Allow public read access to product-images bucket
+CREATE POLICY "Public Read" ON storage.objects FOR SELECT USING (bucket_id = 'product-images');

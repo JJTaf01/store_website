@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const https = require('https');
 const nodemailer = require('nodemailer');
 const supabase = require('./supabase');
+const supabaseAdmin = supabase.supabaseAdmin;
 
 const app = express();
 
@@ -193,6 +194,24 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+async function uploadToSupabase(file) {
+  try {
+    const fileBuffer = fs.readFileSync(file.path);
+    const fileName = file.filename;
+    const { data, error } = await supabaseAdmin.storage
+      .from('product-images')
+      .upload(fileName, fileBuffer, { contentType: file.mimetype, upsert: true });
+    if (error) throw error;
+    const { data: urlData } = supabaseAdmin.storage
+      .from('product-images')
+      .getPublicUrl(fileName);
+    return urlData.publicUrl;
+  } catch (err) {
+    console.log('Supabase Storage upload failed, using local path:', err.message);
+    return null;
+  }
+}
+
 function requireAuth(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
   next();
@@ -341,7 +360,12 @@ app.post('/api/products', requireAdmin, upload.single('image'), async (req, res)
   try {
     const { name, description, price, stock, category } = req.body;
     if (!name || !price) return res.status(400).json({ error: 'Name and price required' });
-    const image = req.file ? '/uploads/' + req.file.filename : null;
+    let image = req.file ? '/uploads/' + req.file.filename : null;
+
+    if (req.file) {
+      const storageUrl = await uploadToSupabase(req.file);
+      if (storageUrl) image = storageUrl;
+    }
 
     const { data: product, error } = await supabase.from('products').insert({
       name, description: description || '', price: parseFloat(price),
@@ -359,13 +383,21 @@ app.put('/api/products/:id', requireAdmin, upload.single('image'), async (req, r
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
     const updates = {};
-    const { name, description, price, stock, category } = req.body;
+    const { name, description, price, stock, category, remove_image } = req.body;
     if (name !== undefined) updates.name = name;
     if (description !== undefined) updates.description = description;
     if (price !== undefined) updates.price = parseFloat(price);
     if (stock !== undefined) updates.stock = parseInt(stock);
     if (category !== undefined) updates.category = category;
-    if (req.file) updates.image = '/uploads/' + req.file.filename;
+    if (req.file) {
+      let image = '/uploads/' + req.file.filename;
+      const storageUrl = await uploadToSupabase(req.file);
+      if (storageUrl) image = storageUrl;
+      updates.image = image;
+    }
+    if (remove_image === 'true' && !req.file) {
+      updates.image = null;
+    }
     updates.updated_at = new Date().toISOString();
 
     const { data: updated, error } = await supabase.from('products').update(updates).eq('id', parseInt(req.params.id)).select().single();
@@ -377,6 +409,11 @@ app.put('/api/products/:id', requireAdmin, upload.single('image'), async (req, r
 app.delete('/api/products/:id', requireAdmin, async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    const { data: product } = await supabase.from('products').select('image').eq('id', id).maybeSingle();
+    if (product && product.image && product.image.includes('supabase')) {
+      const fileName = product.image.split('/').pop();
+      await supabaseAdmin.storage.from('product-images').remove([fileName]);
+    }
     await supabase.from('cart_items').delete().eq('product_id', id);
     await supabase.from('wishlist_items').delete().eq('product_id', id);
     const { error } = await supabase.from('products').delete().eq('id', id);

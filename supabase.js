@@ -10,4 +10,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// For server-side Storage operations (bypasses RLS)
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAdmin = serviceRoleKey
+  ? createClient(supabaseUrl, serviceRoleKey)
+  : supabase;
+
 module.exports = supabase;
+module.exports.supabaseAdmin = supabaseAdmin;
