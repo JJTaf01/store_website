@@ -152,6 +152,26 @@ function showEditModal(product) {
   document.getElementById('admin-form').querySelector('input[name="stock"]').value = product.stock || '';
   document.getElementById('admin-form').querySelector('select[name="category"]').value = product.category || 'Figure';
   document.getElementById('admin-submit-btn').textContent = 'Update Product';
+
+  const preview = document.getElementById('image-preview');
+  const removeCheckbox = document.getElementById('remove-image');
+  if (product.image) {
+    preview.innerHTML = `<img src="${product.image}" style="max-width:150px;max-height:150px;border-radius:8px;border:1px solid #ddd;padding:4px;margin-top:8px"> <small style="color:#666;display:block;margin-top:4px">Current image (select a new file to replace)</small>`;
+    preview.style.display = 'block';
+    if (removeCheckbox) {
+      removeCheckbox.checked = false;
+      removeCheckbox.style.display = 'inline-block';
+      removeCheckbox.nextElementSibling.style.display = 'inline';
+    }
+  } else {
+    preview.style.display = 'none';
+    if (removeCheckbox) {
+      removeCheckbox.checked = false;
+      removeCheckbox.style.display = 'none';
+      removeCheckbox.nextElementSibling.style.display = 'none';
+    }
+  }
+
   modal.style.display = 'flex';
 }
 
@@ -164,6 +184,10 @@ function showAdminModal() {
   document.getElementById('modal-title').textContent = 'Create Product';
   document.getElementById('admin-form').reset();
   document.getElementById('admin-submit-btn').textContent = 'Create Product';
+  document.getElementById('image-preview').style.display = 'none';
+  document.getElementById('remove-image').checked = false;
+  document.getElementById('remove-image').style.display = 'none';
+  document.getElementById('remove-image').nextElementSibling.style.display = 'none';
   modal.style.display = 'flex';
 }
 
@@ -183,7 +207,12 @@ function createAdminModal() {
           <div class="form-group"><label>Stock</label><input type="number" name="stock" min="0" value="1"></div>
         </div>
         <div class="form-group"><label>Category</label><select name="category"><option>Figure</option><option>Cosplay</option><option>Stand</option><option>Other</option></select></div>
-        <div class="form-group"><label>Image</label><input type="file" name="image" accept="image/*"></div>
+        <div class="form-group"><label>Image</label><input type="file" name="image" accept="image/*">
+          <div id="image-preview" style="display:none;margin-top:8px"></div>
+          <label style="display:none;margin-top:8px;font-size:13px;color:#e74c3c;cursor:pointer">
+            <input type="checkbox" name="remove_image" id="remove-image" value="true"> Remove current image
+          </label>
+        </div>
         <button type="submit" class="modal-submit" id="admin-submit-btn">Create Product</button>
       </form>
     </div>`;
@@ -237,11 +266,14 @@ async function loadProducts() {
   try {
     const data = await api.getProducts();
     const products = data.products;
+    const page = window.location.pathname.split('/').pop() || 'index.html';
+    const isShop = page === 'shop.html';
     const singleBottom = document.querySelector('#product1.single-bottom .pro-container');
     const featured = document.querySelector('#product1:not(.new):not(.single-bottom) .pro-container');
     const newSection = document.querySelector('#product1.new .pro-container');
     if (singleBottom) singleBottom.innerHTML = products.slice(0, 4).map(p => renderProductCard(p)).join('');
-    else if (featured) featured.innerHTML = products.slice(0, 8).map(p => renderProductCard(p)).join('');
+    else if (featured && !isShop) featured.innerHTML = products.slice(0, 8).map(p => renderProductCard(p)).join('');
+    else if (featured && isShop) featured.innerHTML = products.map(p => renderProductCard(p)).join('');
     if (newSection) newSection.innerHTML = products.slice(8).map(p => renderProductCard(p)).join('');
 
     document.querySelectorAll('.delete-btn').forEach(btn => {
