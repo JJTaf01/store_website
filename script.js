@@ -247,7 +247,7 @@ function renderProductCard(product) {
   const admin = isAdminMode();
   return `<div class="pro" data-id="${product.id}">
     <div class="img-container" style="position:relative">
-      <img src="${imgSrc}" alt="${product.name}" onclick="window.location.href='sproduct.html?id=${product.id}'" style="cursor:pointer">
+      <img src="${imgSrc}" alt="${product.name}" onerror="this.src='img/button.png'" onclick="window.location.href='sproduct.html?id=${product.id}'" style="cursor:pointer">
       <a href="#" class="wish-link" data-id="${product.id}" title="Add to wishlist"><i class="fa-regular fa-heart"></i></a>
     </div>
     <div class="des">
@@ -344,6 +344,7 @@ async function loadSingleProduct() {
     const p = d.product;
     if (!p) return;
     document.getElementById('MainImg').src = p.image || 'img/button.png';
+    document.getElementById('MainImg').onerror = function () { this.src = 'img/button.png'; };
     document.querySelector('.single-pro-details h4').textContent = p.category || 'Figure';
     document.querySelector('.single-pro-details h2').textContent = '€' + parseFloat(p.price).toFixed(2);
     document.querySelector('.single-pro-details h6').textContent = 'Home / ' + (p.category || 'Figures');
@@ -361,6 +362,7 @@ async function loadSingleProduct() {
     const smallImgs = document.querySelectorAll('.small-img');
     if (smallImgs.length > 0) {
       smallImgs[0].src = p.image || 'img/button.png';
+      smallImgs[0].onerror = function () { this.src = 'img/button.png'; };
       smallImgs[0].onclick = function () { document.getElementById('MainImg').src = this.src; };
       for (let i = 1; i < smallImgs.length; i++) {
         smallImgs[i].src = 'img/products/f' + (i + 1) + '.jpg';
@@ -405,7 +407,7 @@ async function loadCartPage() {
     if (tbody) {
       tbody.innerHTML = items.map(p => `<tr>
         <td><i class="fa-regular fa-circle-xmark remove-item" data-itemid="${p.id}"></i></td>
-        <td><img src="${p.image || 'img/button.png'}" alt="${p.name}" style="width:80px"></td>
+        <td><img src="${p.image || 'img/button.png'}" alt="${p.name}" style="width:80px" onerror="this.src='img/button.png'"></td>
         <td>${p.name}</td>
         <td>€${parseFloat(p.price).toFixed(2)}</td>
         <td><input type="number" class="cart-qty" data-itemid="${p.id}" value="${p.quantity}" min="1"></td>
@@ -461,7 +463,7 @@ async function loadWishlistPage() {
     if (!items.length) { container.innerHTML = '<p style="text-align:center;width:100%;padding:40px">Your wishlist is empty.</p>'; return; }
     container.innerHTML = items.map(p => `<div class="pro">
       <div class="img-container" style="position:relative">
-        <img src="${p.image || 'img/button.png'}" alt="${p.name}" onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">
+        <img src="${p.image || 'img/button.png'}" alt="${p.name}" onerror="this.src='img/button.png'" onclick="window.location.href='sproduct.html?id=${p.product_id}'" style="cursor:pointer">
         <button class="wishlist-remove-btn" data-wishid="${p.product_id}" title="Remove from wishlist" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:50px;height:50px;background:#e74c3c;border:2px solid #e74c3c;border-radius:50%;opacity:1;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:10">
           <i class="fa-solid fa-trash" style="color:white;font-size:20px;pointer-events:none"></i>
         </button>
